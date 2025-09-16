@@ -146,6 +146,16 @@ class RSSCrawler:
         if not html_content:
             return '', []
 
+        # 检查内容是否可能是一个URL
+        stripped_content = html_content.strip()
+        if stripped_content.startswith(('http://', 'https://')) and ' ' not in stripped_content:
+            url = stripped_content
+            # 如果它是一个有效的媒体URL，将其格式化为Markdown图片并添加到媒体列表
+            if self._is_valid_media_url(url):
+                return f'![media]({url})', [url]
+            # 否则，仅将其作为链接返回
+            return f'<{url}>', []
+
         try:
             # 使用BeautifulSoup解析HTML
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -181,6 +191,10 @@ class RSSCrawler:
         except Exception as e:
             logger.error(f"解析HTML描述失败: {e}")
             # 如果解析失败，返回原始内容（去除HTML标签）
+            # 增加一个检查以减少在异常路径中出现警告的可能
+            stripped_content = html_content.strip()
+            if stripped_content.startswith(('http://', 'https://')) and ' ' not in stripped_content:
+                return f'<{stripped_content}>', []
             text_content = BeautifulSoup(html_content, 'html.parser').get_text()
             return text_content.strip(), []
 
