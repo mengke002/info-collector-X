@@ -150,23 +150,28 @@ class RSSCrawler:
             # 使用BeautifulSoup解析HTML
             soup = BeautifulSoup(html_content, 'html.parser')
 
+            # RSSHub 会把引用推文包裹在特定 div 中，这里转成语义化的 blockquote
+            for quote_div in soup.find_all('div', class_='rsshub-quote'):
+                blockquote = soup.new_tag('blockquote')
+                for child in list(quote_div.contents):
+                    blockquote.append(child)
+                quote_div.replace_with(blockquote)
+
             # 提取媒体链接
             media_urls = []
 
-            # 提取图片链接
             for img in soup.find_all('img'):
                 src = img.get('src')
                 if src and self._is_valid_media_url(src):
                     media_urls.append(src)
 
-            # 提取视频链接（如果有）
             for video in soup.find_all('video'):
                 src = video.get('src')
                 if src and self._is_valid_media_url(src):
                     media_urls.append(src)
 
-            # 转换为Markdown格式
-            markdown_content = markdownify(html_content, heading_style="ATX")
+            # 转换为 Markdown 格式，保留已标记的结构
+            markdown_content = markdownify(str(soup), heading_style="ATX")
 
             # 清理Markdown内容
             markdown_content = self._clean_markdown(markdown_content)
@@ -250,24 +255,31 @@ class RSSCrawler:
         if not content and not title:
             return 'Original'
 
-        full_text = f"{title} {content}".lower()
+        combined_text = f"{title}\n{content}".strip()
+        lowercase_text = combined_text.lower()
 
-        # 检查是否为回复
-        if full_text.startswith('@') or '回复' in full_text:
+        # 检查是否为回复（内容以@开头或含回复提示）
+        stripped_content = content.lstrip()
+        if stripped_content.startswith('@') or lowercase_text.startswith('replying to') or '回复' in lowercase_text:
             return 'Reply'
 
         # 检查是否为引用转发
-        if '> ' in content or 'quote' in full_text or '引用' in full_text:
+        if re.search(r'^\s*>', content, flags=re.MULTILINE) or 'quote' in lowercase_text or '引用' in lowercase_text or '转推' in lowercase_text:
             return 'Quote'
 
         # 检查是否为链接分享
-        url_pattern = r'https?://[^\s]+'
-        if re.search(url_pattern, full_text):
-            # 计算链接字符数占总字符数的比例
-            urls = re.findall(url_pattern, full_text)
-            url_chars = sum(len(url) for url in urls)
-            total_chars = len(full_text)
+        url_pattern = r'https?://[^\s)<>]+'
+        # 移除图片、引用内容后再计算纯链接占比，避免误判
+        sanitized_text = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', combined_text)
+        sanitized_text = re.sub(r'^\s*>.*$', '', sanitized_text, flags=re.MULTILINE)
+        urls = re.findall(url_pattern, sanitized_text)
 
+        if urls:
+            total_chars = len(sanitized_text)
+            if total_chars == 0:
+                return 'LinkShare'
+
+            url_chars = sum(len(url) for url in urls)
             if url_chars / total_chars > 0.3:  # 如果链接字符占比超过30%
                 return 'LinkShare'
 
