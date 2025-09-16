@@ -209,9 +209,9 @@ class UserDataProcessor:
             interval_minutes = self.groups_config['high_interval_minutes']
             next_time = now + timedelta(minutes=interval_minutes)
         elif crawl_group == 'medium':
-            # 中频：每2小时
-            interval_hours = self.groups_config['medium_interval_hours']
-            next_time = now + timedelta(hours=interval_hours)
+            # 中频：每90分钟
+            interval_minutes = self.groups_config['medium_interval_minutes']
+            next_time = now + timedelta(minutes=interval_minutes)
         elif crawl_group == 'low':
             # 低频：每6小时
             interval_hours = self.groups_config['low_interval_hours']

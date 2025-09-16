@@ -127,16 +127,16 @@ class Config:
     def get_crawl_groups_config(self) -> Dict[str, int]:
         return {
             'high_interval_minutes': self._get_config_value('crawl_groups', 'high_interval_minutes', 'CRAWL_HIGH_INTERVAL_MINUTES', 20, int),
-            'medium_interval_hours': self._get_config_value('crawl_groups', 'medium_interval_hours', 'CRAWL_MEDIUM_INTERVAL_HOURS', 2, int),
-            'low_interval_hours': self._get_config_value('crawl_groups', 'low_interval_hours', 'CRAWL_LOW_INTERVAL_HOURS', 6, int),
+            'medium_interval_minutes': self._get_config_value('crawl_groups', 'medium_interval_minutes', 'CRAWL_MEDIUM_INTERVAL_MINUTES', 90, int),
+            'low_interval_hours': self._get_config_value('crawl_groups', 'low_interval_hours', 'CRAWL_LOW_INTERVAL_HOURS', 5, int),
         }
 
     def get_task_limits_config(self) -> Dict[str, int]:
         """获取每次任务处理的用户数量上限配置。"""
         return {
-            'high_limit': self._get_config_value('task_limits', 'high_limit', 'CRAWL_HIGH_LIMIT', 30, int),
-            'medium_limit': self._get_config_value('task_limits', 'medium_limit', 'CRAWL_MEDIUM_LIMIT', 100, int),
-            'low_limit': self._get_config_value('task_limits', 'low_limit', 'CRAWL_LOW_LIMIT', 150, int),
+            'high_limit': self._get_config_value('task_limits', 'high_limit', 'CRAWL_HIGH_LIMIT', 50, int),
+            'medium_limit': self._get_config_value('task_limits', 'medium_limit', 'CRAWL_MEDIUM_LIMIT', 200, int),
+            'low_limit': self._get_config_value('task_limits', 'low_limit', 'CRAWL_LOW_LIMIT', 300, int),
         }
 
     def get_failure_handling_config(self) -> Dict[str, int]:
