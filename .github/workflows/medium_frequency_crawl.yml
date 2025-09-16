@@ -43,5 +43,8 @@ jobs:
         MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD || secrets.DB_PASSWORD }}
         RSS_HUB_URL: ${{ secrets.RSS_HUB_URL }}
         RSS_HUB_TOKEN: ${{ secrets.RSS_HUB_TOKEN }}
+        CRAWL_HIGH_LIMIT: ${{ secrets.CRAWL_HIGH_LIMIT }}
+        CRAWL_MEDIUM_LIMIT: ${{ secrets.CRAWL_MEDIUM_LIMIT }}
+        CRAWL_LOW_LIMIT: ${{ secrets.CRAWL_LOW_LIMIT }}
       run: |
         python3.12 main.py --task medium_freq --max-workers ${{ github.event.inputs.max_workers || '2' }}

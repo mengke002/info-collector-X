@@ -132,7 +132,7 @@ class UserDataProcessor:
 
                 # 单个用户处理完成后的延迟
                 if len(results) < len(users):  # 不是最后一个用户
-                    delay = random.uniform(4, 10)
+                    delay = random.uniform(6, 12)
                     logger.debug(f"用户间延迟 {delay:.1f} 秒")
                     time.sleep(delay)
         else:

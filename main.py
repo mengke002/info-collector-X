@@ -42,6 +42,8 @@ def main():
 
     args = parser.parse_args()
 
+    task_limits = config.get_task_limits_config()
+
     print(f"X/Twitter 信息收集系统")
     print(f"执行时间: {get_utc_time().strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print(f"执行任务: {args.task}")
@@ -63,11 +65,11 @@ def main():
 
     # 执行对应任务
     if args.task == 'high_freq':
-        result = run_crawl_task('high', max_workers=args.max_workers, limit=10)
+        result = run_crawl_task('high', max_workers=args.max_workers, limit=task_limits['high_limit'])
     elif args.task == 'medium_freq':
-        result = run_crawl_task('medium', max_workers=args.max_workers, limit=40)
+        result = run_crawl_task('medium', max_workers=args.max_workers, limit=task_limits['medium_limit'])
     elif args.task == 'low_freq':
-        result = run_crawl_task('low', max_workers=args.max_workers, limit=60)
+        result = run_crawl_task('low', max_workers=args.max_workers, limit=task_limits['low_limit'])
     elif args.task == 'full_crawl':
         result = run_full_crawl_task(max_workers=args.max_workers)
     elif args.task == 'user_profiling':

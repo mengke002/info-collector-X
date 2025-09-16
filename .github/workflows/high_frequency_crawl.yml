@@ -1,8 +1,8 @@
 name: 高频用户爬取任务
 on:
   schedule:
-    # 每20分钟运行一次，避开睡眠窗口 (UTC 17:00-22:59)
-    - cron: '*/20 0-16,23 * * *'
+    # 每30分钟运行一次，避开睡眠窗口 (UTC 17:00-22:59)，并与其他任务错峰
+    - cron: '5,35 0-16,23 * * *'
   workflow_dispatch:
     inputs:
       max_workers:
@@ -43,5 +43,8 @@ jobs:
         MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD || secrets.DB_PASSWORD }}
         RSS_HUB_URL: ${{ secrets.RSS_HUB_URL }}
         RSS_HUB_TOKEN: ${{ secrets.RSS_HUB_TOKEN }}
+        CRAWL_HIGH_LIMIT: ${{ secrets.CRAWL_HIGH_LIMIT }}
+        CRAWL_MEDIUM_LIMIT: ${{ secrets.CRAWL_MEDIUM_LIMIT }}
+        CRAWL_LOW_LIMIT: ${{ secrets.CRAWL_LOW_LIMIT }}
       run: |
         python3.12 main.py --task high_freq --max-workers ${{ github.event.inputs.max_workers || '2' }}

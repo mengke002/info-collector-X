@@ -6,11 +6,12 @@ from typing import Dict, Any, Optional
 
 from .processor import UserDataProcessor
 from .database import DatabaseManager
+from .config import config as app_config
 
 logger = logging.getLogger(__name__)
 
 
-def run_crawl_task(crawl_group: str, max_workers: int = 1, limit: int = 10) -> Dict[str, Any]:
+def run_crawl_task(crawl_group: str, max_workers: int = 1, limit: Optional[int] = None) -> Dict[str, Any]:
     """执行爬取任务
 
     Args:
@@ -38,6 +39,16 @@ def run_crawl_task(crawl_group: str, max_workers: int = 1, limit: int = 10) -> D
 
         # 获取待爬取的用户
         db_manager = DatabaseManager()
+
+        if limit is None:
+            limits_config = app_config.get_task_limits_config()
+            group_limit_map = {
+                'high': limits_config['high_limit'],
+                'medium': limits_config['medium_limit'],
+                'low': limits_config['low_limit'],
+            }
+            limit = group_limit_map.get(crawl_group, limits_config['medium_limit'])
+
         users = db_manager.get_users_for_crawl(crawl_group, limit)
 
         if not users:
