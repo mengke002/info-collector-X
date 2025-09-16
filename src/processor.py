@@ -132,17 +132,23 @@ class UserDataProcessor:
 
                 # 单个用户处理完成后的延迟
                 if len(results) < len(users):  # 不是最后一个用户
-                    delay = random.uniform(6, 12)
+                    delay = random.uniform(1, 5)
                     logger.debug(f"用户间延迟 {delay:.1f} 秒")
                     time.sleep(delay)
         else:
             # 并发处理
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # 提交所有任务
-                future_to_user = {
-                    executor.submit(self.process_single_user, user): user
-                    for user in users
-                }
+                future_to_user = {}
+                for idx, user in enumerate(users):
+                    future = executor.submit(self.process_single_user, user)
+                    future_to_user[future] = user
+
+                    # 在并发场景下为任务提交增加轻量随机延迟，避免短时间内触发大量请求
+                    if idx < len(users) - 1:
+                        delay = random.uniform(1.5, 4.0)
+                        logger.debug(f"并发模式任务提交延迟 {delay:.1f} 秒")
+                        time.sleep(delay)
 
                 # 收集结果
                 for future in as_completed(future_to_user):
