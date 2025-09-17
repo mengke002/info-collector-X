@@ -97,12 +97,13 @@ class UserDataProcessor:
 
         return result
 
-    def process_users_batch(self, users: List[Dict[str, Any]], max_workers: int = 1) -> Dict[str, Any]:
+    def process_users_batch(self, users: List[Dict[str, Any]], max_workers: int = 1, delay_after_batch: bool = False) -> Dict[str, Any]:
         """批量处理用户数据
 
         Args:
             users: 用户信息列表
             max_workers: 最大并发线程数
+            delay_after_batch: 是否在批次处理完成后延迟
 
         Returns:
             批量处理结果
@@ -167,8 +168,8 @@ class UserDataProcessor:
                             'error': str(e)
                         })
 
-        # 批次处理完成后的延迟
-        if max_workers > 1:
+        # 批次处理完成后的延迟（仅在需要时）
+        if delay_after_batch and max_workers > 1:
             batch_delay = random.uniform(
                 self.crawler_config['batch_interval_min'],
                 self.crawler_config['batch_interval_max']

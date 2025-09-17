@@ -141,7 +141,8 @@ def run_full_crawl_task(max_workers: int = 1, batch_size: int = 50) -> Dict[str,
 
             logger.info(f"处理第 {batch_num}/{total_batches} 批，{len(batch_users)} 个用户")
 
-            batch_result = processor.process_users_batch(batch_users, max_workers)
+            batch_result = processor.process_users_batch(batch_users, max_workers,
+                                                        delay_after_batch=(batch_num < total_batches))
 
             total_processed += batch_result['users_processed']
             total_success += batch_result['users_success']
