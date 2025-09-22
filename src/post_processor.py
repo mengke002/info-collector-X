@@ -104,9 +104,14 @@ class TwitterPostProcessor:
                     media_urls = []
                     if media_urls_str:
                         try:
-                            media_urls = json.loads(media_urls_str) if isinstance(media_urls_str, str) else media_urls_str
-                        except (json.JSONDecodeError, TypeError):
-                            logger.warning(f"无法解析帖子 {post_id} 的媒体URL: {media_urls_str}")
+                            if isinstance(media_urls_str, str):
+                                if media_urls_str.strip() and media_urls_str.strip() != '[]':
+                                    media_urls = json.loads(media_urls_str)
+                            else:
+                                media_urls = media_urls_str
+                        except (json.JSONDecodeError, TypeError) as e:
+                            logger.warning(f"无法解析帖子 {post_id} 的媒体URL: {media_urls_str}, 错误: {e}")
+                            media_urls = []
 
                     posts.append({
                         'id': post_id,
@@ -127,6 +132,8 @@ class TwitterPostProcessor:
         text_posts = []
         image_posts = []
 
+        logger.info(f"开始分类 {len(posts)} 条帖子")
+
         for post in posts:
             # 从markdown内容和media_urls中提取所有图片URL，不做格式过滤
             image_urls = self._extract_all_image_urls(post)
@@ -138,27 +145,21 @@ class TwitterPostProcessor:
             else:
                 text_posts.append(post)
 
+        logger.info(f"分类结果: {len(text_posts)} 条纯文本, {len(image_posts)} 条图文")
         return text_posts, image_posts
 
     def _extract_all_image_urls(self, post: Dict) -> List[str]:
         """只从media_urls字段中提取图片URL，判断是否为图片格式"""
         image_urls = []
 
-        # 只从media_urls字段中提取URL
+        # media_urls 在 _get_posts_to_process 中已经解析过了，这里直接使用
         media_urls = post.get('media_urls', [])
-        if media_urls:
-            if isinstance(media_urls, str):
-                try:
-                    import json
-                    media_urls = json.loads(media_urls)
-                except (json.JSONDecodeError, TypeError):
-                    media_urls = []
-
-            if isinstance(media_urls, list):
-                # 过滤出图片URL
-                for url in media_urls:
-                    if url and self._is_image_url(url):
-                        image_urls.append(url)
+        
+        if isinstance(media_urls, list):
+            # 过滤出图片URL
+            for url in media_urls:
+                if url and self._is_image_url(url):
+                    image_urls.append(url)
 
         # 去重并保持顺序
         seen = set()
@@ -214,7 +215,6 @@ class TwitterPostProcessor:
                     success = future.result()
                     if success:
                         results['success'] += 1
-                        logger.debug(f"文本帖子 {post['id']} 处理成功")
                     else:
                         results['failed'] += 1
                         logger.warning(f"文本帖子 {post['id']} 处理失败")
@@ -240,7 +240,6 @@ class TwitterPostProcessor:
                     success = future.result()
                     if success:
                         results['success'] += 1
-                        logger.debug(f"图文帖子 {post['id']} 处理成功")
                     else:
                         results['failed'] += 1
                         logger.warning(f"图文帖子 {post['id']} 处理失败")
