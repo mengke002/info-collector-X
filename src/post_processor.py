@@ -58,20 +58,39 @@ class TwitterPostProcessor:
         # 按帖子类型分组处理
         text_posts, image_posts = self._categorize_posts(posts_to_process)
 
-        # 并发处理
+        # 并发处理 - LLM和VLM任务同时进行
         results = {'total': len(posts_to_process), 'success': 0, 'failed': 0}
 
-        if text_posts:
-            logger.info(f"处理 {len(text_posts)} 条纯文本帖子")
-            text_results = self._process_text_posts_concurrent(text_posts)
-            results['success'] += text_results['success']
-            results['failed'] += text_results['failed']
+        # 使用线程池同时处理两种类型的帖子
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = []
 
-        if image_posts:
-            logger.info(f"处理 {len(image_posts)} 条图文帖子")
-            image_results = self._process_image_posts_concurrent(image_posts)
-            results['success'] += image_results['success']
-            results['failed'] += image_results['failed']
+            # 提交文本帖子处理任务
+            if text_posts:
+                logger.info(f"启动 {len(text_posts)} 条纯文本帖子处理")
+                text_future = executor.submit(self._process_text_posts_concurrent, text_posts)
+                futures.append(('text', text_future))
+
+            # 提交图文帖子处理任务
+            if image_posts:
+                logger.info(f"启动 {len(image_posts)} 条图文帖子处理")
+                image_future = executor.submit(self._process_image_posts_concurrent, image_posts)
+                futures.append(('image', image_future))
+
+            # 等待所有任务完成并收集结果
+            for task_type, future in futures:
+                try:
+                    task_results = future.result()
+                    results['success'] += task_results['success']
+                    results['failed'] += task_results['failed']
+                    logger.info(f"{task_type}帖子处理完成: 成功{task_results['success']}条, 失败{task_results['failed']}条")
+                except Exception as e:
+                    logger.error(f"{task_type}帖子处理异常: {e}")
+                    # 将该类型的所有帖子标记为失败
+                    if task_type == 'text' and text_posts:
+                        results['failed'] += len(text_posts)
+                    elif task_type == 'image' and image_posts:
+                        results['failed'] += len(image_posts)
 
         logger.info(f"后处理完成: 总计={results['total']}, 成功={results['success']}, 失败={results['failed']}")
         return results
