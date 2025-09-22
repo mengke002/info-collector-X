@@ -1,4 +1,4 @@
-name: 全量爬取任务
+name: 数据采集-全量用户
 on:
   workflow_dispatch:
     inputs:
