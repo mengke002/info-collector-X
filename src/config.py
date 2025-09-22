@@ -154,6 +154,58 @@ class Config:
             'backup_count': self._get_config_value('logging', 'backup_count', 'LOG_BACKUP_COUNT', 5, int),
         }
 
+    def get_llm_config(self) -> Dict[str, Any]:
+        """获取LLM配置，优先级：环境变量 > config.ini > 默认值"""
+        # API密钥优先从环境变量获取，其次从 config.ini 获取
+        openai_api_key = self._get_config_value('llm', 'openai_api_key', 'OPENAI_API_KEY', None)
+        if not openai_api_key:
+            raise ValueError("OPENAI_API_KEY 未设置。请在环境变量或config.ini中设置LLM功能需要API密钥。")
+
+        return {
+            # 快速模型配置
+            'fast_model_name': self._get_config_value('llm', 'fast_model_name', 'LLM_FAST_MODEL_NAME', 'gpt-3.5-turbo-16k'),
+
+            # 视觉多模态模型配置
+            'fast_vlm_model_name': self._get_config_value('llm', 'fast_vlm_model_name', 'LLM_FAST_VLM_NAME', 'gpt-4-vision-preview'),
+            'fast_vlm_fallback_model_name': self._get_config_value('llm', 'fast_vlm_fallback_model_name', 'LLM_FAST_VLM_FALLBACK_NAME', 'gpt-4-vision-preview'),
+
+            # 智能模型配置
+            'smart_model_name': self._get_config_value('llm', 'smart_model_name', 'LLM_SMART_MODEL_NAME', 'gpt-4-turbo'),
+
+            # API配置
+            'openai_api_key': openai_api_key,
+            'openai_base_url': self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+            'max_content_length': self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 100000, int),
+        }
+
+    def get_fast_model_config(self) -> Dict[str, str]:
+        """获取快速模型配置"""
+        llm_config = self.get_llm_config()
+        return {
+            'provider': 'openai',
+            'model_name': llm_config['fast_model_name'],
+            'api_key': llm_config['openai_api_key'],
+            'base_url': llm_config['openai_base_url']
+        }
+
+    def get_smart_model_config(self) -> Dict[str, str]:
+        """获取智能模型配置"""
+        llm_config = self.get_llm_config()
+        return {
+            'provider': 'openai',
+            'model_name': llm_config['smart_model_name'],
+            'api_key': llm_config['openai_api_key'],
+            'base_url': llm_config['openai_base_url']
+        }
+
+    def get_postprocessing_config(self) -> Dict[str, int]:
+        """获取后处理并发配置"""
+        return {
+            'fast_llm_workers': self._get_config_value('postprocessing', 'fast_llm_workers', 'EXECUTOR_FAST_LLM_WORKERS', 8, int),
+            'fast_vlm_workers': self._get_config_value('postprocessing', 'fast_vlm_workers', 'EXECUTOR_FAST_VLM_WORKERS', 8, int),
+            'image_processing_workers': self._get_config_value('postprocessing', 'image_processing_workers', 'EXECUTOR_IMAGE_PROCESSING_WORKERS', 12, int),
+        }
+
 
 # 全局配置实例
 config = Config()

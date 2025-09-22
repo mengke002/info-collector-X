@@ -12,7 +12,10 @@ from datetime import datetime, timezone, timedelta
 from src.logger import setup_logging
 from src.database import DatabaseManager
 from src.config import config
-from src.tasks import run_crawl_task, run_full_crawl_task, run_user_profiling_task, run_scavenger_task
+from src.tasks import (run_crawl_task, run_full_crawl_task, run_user_profiling_task, run_scavenger_task,
+                      run_post_enrichment_task, run_user_profiling_analysis_task,
+                      run_intelligence_report_task, run_kol_report_task, run_full_analysis_pipeline,
+                      run_postprocess_task)
 
 
 def get_utc_time():
@@ -24,7 +27,8 @@ def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='X/Twitter 信息收集与分析系统')
     parser.add_argument('--task',
-                       choices=['high_freq', 'medium_freq', 'low_freq', 'full_crawl', 'user_profiling', 'scavenger'],
+                       choices=['high_freq', 'medium_freq', 'low_freq', 'full_crawl', 'user_profiling', 'scavenger',
+                               'post_enrichment', 'user_analysis', 'intelligence_report', 'kol_report', 'full_analysis', 'postprocess'],
                        default='high_freq',
                        help='要执行的任务类型')
     parser.add_argument('--output', choices=['json', 'text'], default='text',
@@ -39,6 +43,22 @@ def main():
 
     parser.add_argument('--max-workers', type=int, default=default_max_workers,
                        help='最大并发线程数（CLI参数优先生效，其次为环境变量/配置文件）')
+
+    # 分析任务相关参数
+    parser.add_argument('--batch-size', type=int, default=100,
+                       help='批处理大小（用于帖子富化分析）')
+    parser.add_argument('--user-limit', type=int, default=50,
+                       help='用户分析数量限制')
+    parser.add_argument('--days', type=int, default=30,
+                       help='分析天数范围')
+    parser.add_argument('--hours', type=int, default=24,
+                       help='报告时间范围（小时）')
+    parser.add_argument('--report-limit', type=int, default=300,
+                       help='报告分析的最大帖子数量')
+    parser.add_argument('--hours-back', type=int, default=36,
+                       help='后处理回溯小时数')
+    parser.add_argument('--user-id', type=int,
+                       help='用户ID（用于KOL报告生成）')
 
     args = parser.parse_args()
 
@@ -76,6 +96,30 @@ def main():
         result = run_user_profiling_task()
     elif args.task == 'scavenger':
         result = run_scavenger_task(max_workers=args.max_workers, limit=100)
+
+    # 分析任务
+    elif args.task == 'post_enrichment':
+        result = run_post_enrichment_task(batch_size=args.batch_size, max_workers=args.max_workers)
+    elif args.task == 'user_analysis':
+        result = run_user_profiling_analysis_task(limit=args.user_limit, days=args.days)
+    elif args.task == 'intelligence_report':
+        result = run_intelligence_report_task(hours=args.hours, limit=args.report_limit)
+    elif args.task == 'kol_report':
+        if args.user_id is None:
+            print("❌ KOL报告需要指定 --user-id 参数")
+            sys.exit(1)
+        result = run_kol_report_task(user_id=args.user_id, days=args.days)
+    elif args.task == 'full_analysis':
+        result = run_full_analysis_pipeline(
+            post_batch_size=args.batch_size,
+            post_max_workers=args.max_workers,
+            user_limit=args.user_limit,
+            user_days=args.days,
+            report_hours=args.hours,
+            report_limit=args.report_limit
+        )
+    elif args.task == 'postprocess':
+        result = run_postprocess_task(hours_back=args.hours_back)
     else:
         print(f"未知任务类型: {args.task}")
         sys.exit(1)
@@ -102,14 +146,80 @@ def print_result(result: dict, task_type: str):
         return
 
     print(f"✅ 任务完成")
-    print(f"   处理用户: {result.get('users_processed', 0)} 个")
-    print(f"   成功爬取: {result.get('users_success', 0)} 个")
-    print(f"   失败次数: {result.get('users_failed', 0)} 个")
-    print(f"   新增帖子: {result.get('posts_inserted', 0)} 条")
-    print(f"   耗时: {result.get('elapsed_seconds', 0):.1f} 秒")
 
-    if task_type == 'user_profiling':
+    # 采集任务的结果显示
+    if task_type in ['high_freq', 'medium_freq', 'low_freq', 'full_crawl', 'scavenger']:
+        print(f"   处理用户: {result.get('users_processed', 0)} 个")
+        print(f"   成功爬取: {result.get('users_success', 0)} 个")
+        print(f"   失败次数: {result.get('users_failed', 0)} 个")
+        print(f"   新增帖子: {result.get('posts_inserted', 0)} 条")
+        print(f"   耗时: {result.get('elapsed_seconds', 0):.1f} 秒")
+
+    # 用户画像任务
+    elif task_type == 'user_profiling':
         print(f"   更新用户分组: {result.get('users_updated', 0)} 个")
+
+    # 帖子富化分析任务
+    elif task_type == 'post_enrichment':
+        print(f"   处理帖子: {result.get('posts_processed', 0)} 条")
+        print(f"   成功分析: {result.get('posts_success', 0)} 条")
+        print(f"   失败次数: {result.get('posts_failed', 0)} 条")
+
+    # 用户档案分析任务
+    elif task_type == 'user_analysis':
+        print(f"   处理用户: {result.get('users_processed', 0)} 个")
+        print(f"   成功分析: {result.get('users_success', 0)} 个")
+        print(f"   失败次数: {result.get('users_failed', 0)} 个")
+
+    # 情报报告生成任务
+    elif task_type == 'intelligence_report':
+        print(f"   报告标题: {result.get('report_title', '未知')}")
+        print(f"   分析帖子: {result.get('posts_analyzed', 0)} 条")
+        print(f"   时间范围: {result.get('time_range', '未知')}")
+
+    # KOL报告生成任务
+    elif task_type == 'kol_report':
+        print(f"   报告标题: {result.get('report_title', '未知')}")
+        print(f"   用户: @{result.get('user_handle', '未知')}")
+
+    # 完整分析流水线
+    elif task_type == 'full_analysis':
+        print(f"   流水线状态: {result.get('message', '未知')}")
+        pipeline_results = result.get('pipeline_results', {})
+
+        if 'post_enrichment' in pipeline_results:
+            pe_result = pipeline_results['post_enrichment']
+            print(f"   帖子富化: 处理 {pe_result.get('posts_processed', 0)} 条，成功 {pe_result.get('posts_success', 0)} 条")
+
+        if 'user_profiling' in pipeline_results:
+            up_result = pipeline_results['user_profiling']
+            print(f"   用户档案: 处理 {up_result.get('users_processed', 0)} 个，成功 {up_result.get('users_success', 0)} 个")
+
+        if 'intelligence_report' in pipeline_results:
+            ir_result = pipeline_results['intelligence_report']
+            print(f"   情报报告: {ir_result.get('report_title', '未知')}")
+
+    # 后处理任务
+    elif task_type == 'postprocess':
+        print(f"   回溯时间: {result.get('hours_back', 0)} 小时")
+        print(f"   处理帖子: {result.get('posts_total', 0)} 条")
+        print(f"   成功处理: {result.get('posts_success', 0)} 条")
+        print(f"   失败次数: {result.get('posts_failed', 0)} 条")
+        print(f"   成功率: {result.get('success_rate', 0):.1f}%")
+
+        # 显示处理统计信息
+        stats = result.get('processing_stats', {})
+        if stats:
+            print(f"   统计信息:")
+            print(f"     - 未处理帖子: {stats.get('unprocessed_posts', 0)} 条")
+            print(f"     - 模型使用统计:")
+            model_stats = stats.get('model_stats', {})
+            for model, count in model_stats.items():
+                print(f"       * {model}: {count} 条")
+
+    # 显示自定义消息
+    if 'message' in result and task_type != 'full_analysis':
+        print(f"   备注: {result['message']}")
 
 
 if __name__ == "__main__":

@@ -60,6 +60,22 @@ class DatabaseManager:
                 cursor.execute(self._get_twitter_posts_table_sql())
                 logger.info("已创建或确认 twitter_posts 表")
 
+                # 创建 post_analysis 表
+                cursor.execute(self._get_post_analysis_table_sql())
+                logger.info("已创建或确认 post_analysis 表")
+
+                # 创建 twitter_user_profiles 表
+                cursor.execute(self._get_twitter_user_profiles_table_sql())
+                logger.info("已创建或确认 twitter_user_profiles 表")
+
+                # 创建 intelligence_reports 表
+                cursor.execute(self._get_intelligence_reports_table_sql())
+                logger.info("已创建或确认 intelligence_reports 表")
+
+                # 创建 postprocessing 表
+                cursor.execute(self._get_postprocessing_table_sql())
+                logger.info("已创建或确认 postprocessing 表")
+
                 conn.commit()
                 logger.info("数据库表初始化完成")
 
@@ -108,6 +124,76 @@ class DatabaseManager:
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='收集到的Twitter帖子数据';
         """
 
+    def _get_post_analysis_table_sql(self) -> str:
+        """获取创建 post_analysis 表的SQL"""
+        return """
+        CREATE TABLE IF NOT EXISTS `post_analysis` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `post_id` INT NOT NULL COMMENT '关联到twitter_posts表的ID',
+          `analysis_status` ENUM('pending', 'completed', 'failed') NOT NULL DEFAULT 'pending' COMMENT 'LLM分析状态',
+          `llm_summary` TEXT COMMENT 'LLM生成的单句摘要',
+          `post_tag` VARCHAR(255) COMMENT 'LLM生成的内容标签',
+          `value_assets` JSON COMMENT 'LLM提取的价值资产链接列表',
+          `mentioned_entities` JSON COMMENT 'LLM提取的提及实体',
+          `content_type` VARCHAR(100) COMMENT 'LLM识别的内容类型',
+          `is_incomplete` BOOLEAN DEFAULT FALSE COMMENT 'LLM判断是否为长文的一部分',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY `uniq_post_id` (`post_id`),
+          KEY `idx_analysis_status` (`analysis_status`),
+          CONSTRAINT `fk_analysis_post` FOREIGN KEY (`post_id`) REFERENCES `twitter_posts` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='帖子分析结果表';
+        """
+
+    def _get_twitter_user_profiles_table_sql(self) -> str:
+        """获取创建 twitter_user_profiles 表的SQL"""
+        return """
+        CREATE TABLE IF NOT EXISTS `twitter_user_profiles` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `user_table_id` INT NOT NULL COMMENT '关联到twitter_users表的ID',
+          `profile_data` JSON NOT NULL COMMENT '存储用户画像的JSON对象',
+          `generated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '本次画像生成时间',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY `uniq_user_table_id` (`user_table_id`),
+          CONSTRAINT `fk_profile_user` FOREIGN KEY (`user_table_id`) REFERENCES `twitter_users` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户数字档案与画像表';
+        """
+
+    def _get_intelligence_reports_table_sql(self) -> str:
+        """获取创建 intelligence_reports 表的SQL"""
+        return """
+        CREATE TABLE IF NOT EXISTS `intelligence_reports` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `report_type` ENUM('daily', 'weekly', 'monthly_kol') NOT NULL COMMENT '报告类型',
+          `report_title` VARCHAR(512) NOT NULL COMMENT '报告标题',
+          `report_content` MEDIUMTEXT NOT NULL COMMENT '报告内容 (Markdown格式)',
+          `time_range_start` DATETIME COMMENT '报告覆盖的开始时间',
+          `time_range_end` DATETIME COMMENT '报告覆盖的结束时间',
+          `related_user_id` INT DEFAULT NULL COMMENT '如果是KOL报告，关联的用户ID',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='最终生成的情报报告表';
+        """
+
+    def _get_postprocessing_table_sql(self) -> str:
+        """获取创建 postprocessing 表的SQL"""
+        return """
+        CREATE TABLE IF NOT EXISTS `postprocessing` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `post_id` INT NOT NULL COMMENT '关联twitter_posts表的主键',
+          `interpretation_text` TEXT NOT NULL COMMENT 'LLM生成的完整解读内容',
+          `model_name` VARCHAR(255) NOT NULL COMMENT '使用的模型名称',
+          `status` ENUM('success', 'failed') NOT NULL DEFAULT 'success' COMMENT '处理状态',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+          UNIQUE KEY `uniq_post_id` (`post_id`),
+          INDEX `idx_status` (`status`),
+          INDEX `idx_created_at` (`created_at`),
+          CONSTRAINT `fk_postprocessing_post` FOREIGN KEY (`post_id`)
+            REFERENCES `twitter_posts`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        COMMENT='Twitter帖子后处理解读结果表';
+        """
+
     def recreate_tables(self):
         """删除并重新创建所有表"""
         try:
@@ -115,6 +201,10 @@ class DatabaseManager:
                 cursor = conn.cursor()
 
                 # 删除表（注意外键约束的顺序）
+                cursor.execute("DROP TABLE IF EXISTS intelligence_reports")
+                cursor.execute("DROP TABLE IF EXISTS postprocessing")
+                cursor.execute("DROP TABLE IF EXISTS twitter_user_profiles")
+                cursor.execute("DROP TABLE IF EXISTS post_analysis")
                 cursor.execute("DROP TABLE IF EXISTS twitter_posts")
                 cursor.execute("DROP TABLE IF EXISTS twitter_users")
                 logger.info("已删除现有表")
@@ -452,3 +542,269 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"更新用户画像失败: {e}")
             return 0
+
+    # 分析相关的数据库操作方法
+
+    def get_posts_for_enrichment(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """获取待富化分析的帖子列表
+
+        Args:
+            limit: 最大返回数量
+
+        Returns:
+            待分析的帖子信息列表
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+                sql = """
+                SELECT p.id, p.post_content, p.post_url, p.user_table_id, p.published_at
+                FROM twitter_posts p
+                LEFT JOIN post_analysis pa ON p.id = pa.post_id
+                WHERE pa.id IS NULL
+                ORDER BY p.id ASC
+                LIMIT %s
+                """
+
+                cursor.execute(sql, (limit,))
+                posts = cursor.fetchall()
+
+                logger.info(f"获取到 {len(posts)} 个待富化分析的帖子")
+                return posts
+
+        except Exception as e:
+            logger.error(f"获取待富化分析帖子失败: {e}")
+            return []
+
+    def create_pending_post_analysis(self, post_ids: List[int]) -> int:
+        """为帖子预创建pending状态的分析记录
+
+        Args:
+            post_ids: 帖子ID列表
+
+        Returns:
+            创建的记录数
+        """
+        if not post_ids:
+            return 0
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                sql = """
+                INSERT IGNORE INTO post_analysis (post_id, analysis_status)
+                VALUES (%s, 'pending')
+                """
+
+                values = [(post_id,) for post_id in post_ids]
+                cursor.executemany(sql, values)
+                conn.commit()
+
+                inserted_count = cursor.rowcount
+                logger.info(f"为 {inserted_count} 个帖子创建了pending分析记录")
+                return inserted_count
+
+        except Exception as e:
+            logger.error(f"创建pending分析记录失败: {e}")
+            return 0
+
+    def update_post_analysis(self, post_id: int, analysis_result: Dict[str, Any], status: str = 'completed') -> bool:
+        """更新帖子分析结果
+
+        Args:
+            post_id: 帖子ID
+            analysis_result: LLM分析结果
+            status: 分析状态
+
+        Returns:
+            是否更新成功
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                sql = """
+                UPDATE post_analysis
+                SET llm_summary = %s,
+                    post_tag = %s,
+                    value_assets = %s,
+                    mentioned_entities = %s,
+                    content_type = %s,
+                    is_incomplete = %s,
+                    analysis_status = %s,
+                    updated_at = NOW()
+                WHERE post_id = %s
+                """
+
+                import json
+                cursor.execute(sql, (
+                    analysis_result.get('llm_summary'),
+                    analysis_result.get('post_tag'),
+                    json.dumps(analysis_result.get('value_assets', []), ensure_ascii=False),
+                    json.dumps(analysis_result.get('mentioned_entities', []), ensure_ascii=False),
+                    analysis_result.get('content_type'),
+                    analysis_result.get('is_incomplete', False),
+                    status,
+                    post_id
+                ))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"更新帖子分析结果失败: {e}")
+            return False
+
+    def get_user_enriched_posts(self, user_id: int, days: int = 30) -> List[Dict[str, Any]]:
+        """获取用户指定时间内的富化帖子数据
+
+        Args:
+            user_id: 用户ID
+            days: 天数
+
+        Returns:
+            富化后的帖子数据列表
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+                sql = """
+                SELECT p.id, p.post_content, p.post_url, p.published_at, p.post_type,
+                       pa.llm_summary, pa.post_tag, pa.value_assets, pa.mentioned_entities,
+                       pa.content_type, pa.is_incomplete
+                FROM twitter_posts p
+                JOIN post_analysis pa ON p.id = pa.post_id
+                WHERE p.user_table_id = %s
+                  AND pa.analysis_status = 'completed'
+                  AND p.published_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                ORDER BY p.published_at DESC
+                """
+
+                cursor.execute(sql, (user_id, days))
+                posts = cursor.fetchall()
+
+                logger.info(f"获取到用户 {user_id} 在过去 {days} 天内的 {len(posts)} 条富化帖子")
+                return posts
+
+        except Exception as e:
+            logger.error(f"获取用户富化帖子失败: {e}")
+            return []
+
+    def save_user_profile(self, user_id: int, profile_data: Dict[str, Any]) -> bool:
+        """保存或更新用户画像数据
+
+        Args:
+            user_id: 用户ID
+            profile_data: 画像数据
+
+        Returns:
+            是否保存成功
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                import json
+                sql = """
+                INSERT INTO twitter_user_profiles (user_table_id, profile_data, generated_at)
+                VALUES (%s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                    profile_data = VALUES(profile_data),
+                    generated_at = VALUES(generated_at),
+                    updated_at = NOW()
+                """
+
+                cursor.execute(sql, (
+                    user_id,
+                    json.dumps(profile_data, ensure_ascii=False)
+                ))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"保存用户画像失败: {e}")
+            return False
+
+    def get_enriched_posts_for_report(self, start_time: datetime, end_time: datetime, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """获取指定时间范围内的富化帖子用于报告生成
+
+        Args:
+            start_time: 开始时间
+            end_time: 结束时间
+            limit: 限制数量
+
+        Returns:
+            富化帖子数据列表
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+                sql = """
+                SELECT p.id, p.post_content, p.post_url, p.published_at, p.post_type,
+                       u.user_id,
+                       pa.llm_summary, pa.post_tag, pa.value_assets, pa.mentioned_entities,
+                       pa.content_type, pa.is_incomplete
+                FROM twitter_posts p
+                JOIN post_analysis pa ON p.id = pa.post_id
+                JOIN twitter_users u ON p.user_table_id = u.id
+                WHERE pa.analysis_status = 'completed'
+                  AND p.published_at >= %s
+                  AND p.published_at <= %s
+                ORDER BY p.published_at DESC
+                """
+
+                if limit:
+                    sql += f" LIMIT {limit}"
+
+                cursor.execute(sql, (start_time, end_time))
+                posts = cursor.fetchall()
+
+                logger.info(f"获取到时间范围内的 {len(posts)} 条富化帖子用于报告生成")
+                return posts
+
+        except Exception as e:
+            logger.error(f"获取报告富化帖子失败: {e}")
+            return []
+
+    def save_intelligence_report(self, report_type: str, title: str, content: str,
+                                start_time: Optional[datetime] = None,
+                                end_time: Optional[datetime] = None,
+                                related_user_id: Optional[int] = None) -> bool:
+        """保存情报报告
+
+        Args:
+            report_type: 报告类型
+            title: 报告标题
+            content: 报告内容
+            start_time: 开始时间
+            end_time: 结束时间
+            related_user_id: 相关用户ID
+
+        Returns:
+            是否保存成功
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                sql = """
+                INSERT INTO intelligence_reports
+                (report_type, report_title, report_content, time_range_start, time_range_end, related_user_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """
+
+                cursor.execute(sql, (
+                    report_type, title, content, start_time, end_time, related_user_id
+                ))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"保存情报报告失败: {e}")
+            return False
