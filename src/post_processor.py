@@ -128,30 +128,75 @@ class TwitterPostProcessor:
         image_posts = []
 
         for post in posts:
-            # 检查是否有图片（只处理 png/jpg/jpeg 格式）
-            has_images = False
-            if post['media_urls']:
-                for url in post['media_urls']:
-                    if self._is_supported_image_format(url):
-                        has_images = True
-                        break
+            # 从markdown内容和media_urls中提取所有图片URL，不做格式过滤
+            image_urls = self._extract_all_image_urls(post)
 
-            if has_images:
+            if image_urls:
+                # 将提取到的图片URL添加到post中，供后续VLM处理使用
+                post['extracted_image_urls'] = image_urls
                 image_posts.append(post)
             else:
                 text_posts.append(post)
 
         return text_posts, image_posts
 
-    def _is_supported_image_format(self, url: str) -> bool:
-        """检查URL是否为支持的图片格式"""
+    def _extract_all_image_urls(self, post: Dict) -> List[str]:
+        """只从media_urls字段中提取图片URL，判断是否为图片格式"""
+        image_urls = []
+
+        # 只从media_urls字段中提取URL
+        media_urls = post.get('media_urls', [])
+        if media_urls:
+            if isinstance(media_urls, str):
+                try:
+                    import json
+                    media_urls = json.loads(media_urls)
+                except (json.JSONDecodeError, TypeError):
+                    media_urls = []
+
+            if isinstance(media_urls, list):
+                # 过滤出图片URL
+                for url in media_urls:
+                    if url and self._is_image_url(url):
+                        image_urls.append(url)
+
+        # 去重并保持顺序
+        seen = set()
+        unique_urls = []
+        for url in image_urls:
+            if url not in seen:
+                seen.add(url)
+                unique_urls.append(url)
+
+        return unique_urls
+
+    def _is_image_url(self, url: str) -> bool:
+        """判断URL是否为图片格式"""
         if not url:
             return False
 
-        url_lower = url.lower()
-        supported_formats = ['.png', '.jpg', '.jpeg']
+        # 检查是否包含twimg域名
+        if "twimg" not in url:
+            return False
 
-        return any(url_lower.endswith(fmt) for fmt in supported_formats)
+        # 检查URL参数中的format参数，或者文件扩展名
+        url_lower = url.lower()
+
+        # 检查format参数 (例如: ?format=jpg)
+        if "format=jpg" in url_lower or "format=jpeg" in url_lower or "format=png" in url_lower or "format=webp" in url_lower:
+            return True
+
+        # 检查文件扩展名
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+        for ext in image_extensions:
+            if ext in url_lower:
+                return True
+
+        return False
+
+    def _is_supported_image_format(self, url: str) -> bool:
+        """检查URL是否为支持的图片格式 - 调用新的图片判断函数"""
+        return self._is_image_url(url)
 
     def _process_text_posts_concurrent(self, posts: List[Dict]) -> Dict[str, int]:
         """并发处理纯文本帖子"""
@@ -246,13 +291,12 @@ class TwitterPostProcessor:
         """处理单个图文帖子"""
         try:
             content = post['content'] or ""
-            media_urls = post['media_urls']
 
-            # 筛选支持的图片URLs
-            image_urls = [url for url in media_urls if self._is_supported_image_format(url)]
+            # 使用新提取的图片URL，不做格式过滤
+            image_urls = post.get('extracted_image_urls', [])
 
             if not image_urls:
-                logger.debug(f"帖子 {post['id']} 没有支持的图片格式，降级为文本处理")
+                logger.debug(f"帖子 {post['id']} 没有提取到图片URL，降级为文本处理")
                 return self._process_text_post(post)
 
             # 限制图片数量（避免上下文过长）
@@ -269,7 +313,7 @@ class TwitterPostProcessor:
             model_name = llm_config['fast_vlm_model_name']
 
             try:
-                # 准备图片数据
+                # 准备图片数据 - 所有URL都传递给VLM，不做过滤
                 image_data_list = []
                 for url in image_urls:
                     image_data_list.append({
@@ -278,6 +322,8 @@ class TwitterPostProcessor:
                         'url': url,
                         'success': True
                     })
+
+                logger.debug(f"帖子 {post['id']} 准备处理 {len(image_data_list)} 张图片: {[url[:50]+'...' for url in image_urls]}")
 
                 # 调用VLM - 检查是否有call_vlm方法
                 if hasattr(self.llm_client, 'call_vlm'):
