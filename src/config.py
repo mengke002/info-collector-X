@@ -154,6 +154,26 @@ class Config:
             'backup_count': self._get_config_value('logging', 'backup_count', 'LOG_BACKUP_COUNT', 5, int),
         }
 
+    def get_analysis_config(self) -> Dict[str, Any]:
+        """获取内容解读配置（目前支持选择提示词模式）"""
+        mode = self._get_config_value('analysis', 'interpretation_mode', 'INTERPRETATION_MODE', 'light', str)
+
+        if isinstance(mode, str):
+            normalized_mode = mode.strip().lower()
+        else:
+            normalized_mode = 'light'
+
+        if normalized_mode not in {'light', 'heavy'}:
+            logger.warning(
+                "interpretation_mode 配置值 %s 无效，将回退到 light 模式",
+                mode
+            )
+            normalized_mode = 'light'
+
+        return {
+            'interpretation_mode': normalized_mode
+        }
+
     def get_llm_config(self) -> Dict[str, Any]:
         """获取LLM配置，优先级：环境变量 > config.ini > 默认值"""
         # API密钥优先从环境变量获取，其次从 config.ini 获取

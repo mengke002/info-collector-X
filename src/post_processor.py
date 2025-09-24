@@ -33,7 +33,19 @@ class TwitterPostProcessor:
         self.fast_vlm_workers = postprocessing_config['fast_vlm_workers']
         self.image_processing_workers = postprocessing_config['image_processing_workers']
 
-        logger.info(f"后处理器初始化完成 - FastLLM:{self.fast_llm_workers}, FastVLM:{self.fast_vlm_workers}, 图片处理:{self.image_processing_workers}")
+        analysis_config = config.get_analysis_config()
+        self.interpretation_mode = analysis_config.get('interpretation_mode', 'light')
+        if self.interpretation_mode not in {'light', 'heavy'}:
+            logger.warning(
+                "interpretation_mode 配置值 %s 无效，将回退到 light 模式",
+                self.interpretation_mode
+            )
+            self.interpretation_mode = 'light'
+
+        logger.info(
+            f"后处理器初始化完成 - FastLLM:{self.fast_llm_workers}, FastVLM:{self.fast_vlm_workers}, "
+            f"图片处理:{self.image_processing_workers}, 解读模式:{self.interpretation_mode}"
+        )
 
     def process_posts(self, hours_back: int = 36) -> Dict[str, int]:
         """处理指定时间范围内的帖子
@@ -386,7 +398,16 @@ class TwitterPostProcessor:
             return False
 
     def _get_llm_prompt(self, post_text: str) -> str:
-        """生成LLM分析提示词（纯文本）"""
+        """根据配置选择合适的LLM提示词"""
+        if self.interpretation_mode == 'heavy':
+            logger.debug("使用 'heavy' 模式的LLM prompt")
+            return self._get_llm_prompt_heavy(post_text)
+
+        logger.debug("使用 'light' 模式的LLM prompt")
+        return self._get_llm_prompt_light(post_text)
+
+    def _get_llm_prompt_heavy(self, post_text: str) -> str:
+        """生成LLM分析提示词（纯文本，重度模式）"""
         return f"""# Role: 社交媒体内容分析师
 
 # Context:
@@ -404,8 +425,34 @@ class TwitterPostProcessor:
 
 严格遵循上述输出要求，用中文输出你的完整分析结果。"""
 
+    def _get_llm_prompt_light(self, post_text: str) -> str:
+        """生成LLM分析提示词（纯文本，轻量模式）"""
+        return f"""# Role: 社交媒体内容分析师
+
+# Context:
+你正在分析一条来自X/Twitter的纯文本推文。你的任务是为其生成一个“文本深度洞察摘要”，该摘要将作为后续宏观分析的输入。
+
+# Input:
+- 推文内容: ```{post_text}```
+
+# Your Task:
+请仔细阅读推文文本，深入理解后，输出一段“文本深度洞察摘要”。摘要需自然融合以下三个层面（若能识别到）：
+1.  **核心信息**: 推文讨论的主要观点和关键信息是什么？
+2.  **情绪意图**: 作者展现了怎样的情绪与语气？他/她发文的潜在动机是什么？
+3.  **思想价值**: 这条推文试图引发读者怎样的思考或共鸣？
+"""
+
     def _get_vlm_prompt(self, post_text: str) -> str:
-        """生成VLM分析提示词（图文）"""
+        """根据配置选择合适的VLM提示词"""
+        if self.interpretation_mode == 'heavy':
+            logger.debug("使用 'heavy' 模式的VLM prompt")
+            return self._get_vlm_prompt_heavy(post_text)
+
+        logger.debug("使用 'light' 模式的VLM prompt")
+        return self._get_vlm_prompt_light(post_text)
+
+    def _get_vlm_prompt_heavy(self, post_text: str) -> str:
+        """生成VLM分析提示词（图文，重度模式）"""
         return f"""# Role: 社交媒体内容分析师
 
 # Context:
@@ -422,6 +469,19 @@ class TwitterPostProcessor:
 3. **深入解读**: 结合推文内容和图片信息，做1个深度解读，分析作者的情绪、观点以及他/她真正想传达的核心思想。
 
 严格遵循上述输出要求，用中文输出你的完整分析结果。"""
+
+    def _get_vlm_prompt_light(self, post_text: str) -> str:
+        """生成VLM分析提示词（图文，轻量模式）"""
+        return f"""# Context:
+你正在分析一条包含文本和图片的X/Twitter推文。你的任务是生成一个**图文综合摘要**，作为后续宏观分析的输入。
+
+# Input:
+- 推文文本: ```{post_text}```
+- 图片: 参考附件
+
+# Your Task:
+请仔细阅读推文文本和所有图片，综合深入理解后，输出一段“图文综合摘要”。
+"""
 
     def _save_postprocessing_result(self, post_id: int, interpretation: str,
                                    model_name: str, status: str = 'success') -> bool:

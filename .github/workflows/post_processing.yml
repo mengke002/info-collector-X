@@ -39,6 +39,7 @@ jobs:
           LLM_FAST_VLM_NAME: ${{ secrets.LLM_FAST_VLM_NAME }}
           LLM_FAST_VLM_FALLBACK_NAME: ${{ secrets.LLM_FAST_VLM_FALLBACK_NAME }}
           LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+          INTERPRETATION_MODE: ${{ vars.INTERPRETATION_MODE }}
 
           # 数据库配置
           DB_HOST: ${{ secrets.DB_HOST }}
