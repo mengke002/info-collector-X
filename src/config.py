@@ -128,7 +128,7 @@ class Config:
         return {
             'high_interval_minutes': self._get_config_value('crawl_groups', 'high_interval_minutes', 'CRAWL_HIGH_INTERVAL_MINUTES', 20, int),
             'medium_interval_minutes': self._get_config_value('crawl_groups', 'medium_interval_minutes', 'CRAWL_MEDIUM_INTERVAL_MINUTES', 90, int),
-            'low_interval_hours': self._get_config_value('crawl_groups', 'low_interval_hours', 'CRAWL_LOW_INTERVAL_HOURS', 5, int),
+            'low_interval_hours': self._get_config_value('crawl_groups', 'low_interval_hours', 'CRAWL_LOW_INTERVAL_HOURS', 3, int),
         }
 
     def get_task_limits_config(self) -> Dict[str, int]:
