@@ -181,16 +181,21 @@ class Config:
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY 未设置。请在环境变量或config.ini中设置LLM功能需要API密钥。")
 
+        # 解析报告模型列表
         models_raw = self._get_config_value('llm', 'report_models', 'LLM_REPORT_MODELS', '', str)
         report_models = self._parse_model_list(models_raw)
         
-        legacy_smart = self._get_config_value('llm', 'smart_model_name', 'LLM_SMART_MODEL_NAME', '', str)
-        if not report_models and legacy_smart:
-            report_models.append(legacy_smart)
+        # 读取 smart_model_name，并提供默认值
+        smart_model_name = self._get_config_value('llm', 'smart_model_name', 'LLM_SMART_MODEL_NAME', 'gpt-4.1', str)
+
+        # 如果 report_models 未设置，则使用 smart_model_name 作为备用
+        if not report_models and smart_model_name:
+            report_models.append(smart_model_name)
 
         return {
             'fast_model_name': self._get_config_value('llm', 'fast_model_name', 'LLM_FAST_MODEL_NAME', 'gpt-3.5-turbo-16k'),
             'fast_vlm_model_name': self._get_config_value('llm', 'fast_vlm_model_name', 'LLM_FAST_VLM_NAME', 'gpt-4-vision-preview'),
+            'smart_model_name': smart_model_name,
             'report_models': report_models,
             'openai_api_key': openai_api_key,
             'openai_base_url': self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1'),
