@@ -15,7 +15,7 @@ from src.config import config
 from src.tasks import (run_crawl_task, run_full_crawl_task, run_user_profiling_task, run_scavenger_task,
                       run_post_enrichment_task, run_user_profiling_analysis_task,
                       run_intelligence_report_task, run_kol_report_task, run_full_analysis_pipeline,
-                      run_postprocess_task)
+                      run_postprocess_task, run_post_insights_task)
 
 
 def get_utc_time():
@@ -28,7 +28,7 @@ def main():
     parser = argparse.ArgumentParser(description='X/Twitter 信息收集与分析系统')
     parser.add_argument('--task',
                        choices=['high_freq', 'medium_freq', 'low_freq', 'full_crawl', 'user_profiling', 'scavenger',
-                               'post_enrichment', 'user_analysis', 'intelligence_report', 'kol_report', 'full_analysis', 'postprocess'],
+                               'post_enrichment', 'user_analysis', 'intelligence_report', 'kol_report', 'full_analysis', 'postprocess', 'post_insights'],
                        default='high_freq',
                        help='要执行的任务类型')
     parser.add_argument('--output', choices=['json', 'text'], default='text',
@@ -120,6 +120,8 @@ def main():
         )
     elif args.task == 'postprocess':
         result = run_postprocess_task(hours_back=args.hours_back)
+    elif args.task == 'post_insights':
+        result = run_post_insights_task(batch_size=args.batch_size)
     else:
         print(f"未知任务类型: {args.task}")
         sys.exit(1)

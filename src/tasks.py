@@ -13,6 +13,7 @@ from .post_enrichment import run_post_enrichment
 from .user_profiling import run_user_profiling
 from .intelligence_reports import run_daily_intelligence_report, run_kol_report
 from .post_processor import TwitterPostProcessor
+from .post_insights_analysis import run_post_insights_analysis_task as run_insights_task
 
 logger = logging.getLogger(__name__)
 
@@ -436,6 +437,32 @@ def run_kol_report_task(user_id: int, days: int = 30) -> Dict[str, Any]:
             'error': str(e),
             'task_type': 'kol_report',
             'user_id': user_id,
+        }
+
+def run_post_insights_task(batch_size: int = 100) -> Dict[str, Any]:
+    """执行帖子洞察分析（新版）任务"""
+    try:
+        logger.info(f"开始执行帖子洞察分析任务，批次大小: {batch_size}")
+        result = run_insights_task(batch_size)
+
+        return {
+            'success': True,
+            'task_type': 'post_insights',
+            'posts_processed': result.get('total', 0),
+            'posts_success': result.get('success', 0),
+            'posts_failed': result.get('failed', 0),
+            'message': f"帖子洞察分析完成: 处理{result.get('total', 0)}条，成功{result.get('success', 0)}条"
+        }
+
+    except Exception as e:
+        logger.error(f"帖子洞察分析任务执行失败: {e}")
+        return {
+            'success': False,
+            'error': str(e),
+            'task_type': 'post_insights',
+            'posts_processed': 0,
+            'posts_success': 0,
+            'posts_failed': 0,
         }
 
 

@@ -76,6 +76,10 @@ class DatabaseManager:
                 cursor.execute(self._get_postprocessing_table_sql())
                 logger.info("已创建或确认 postprocessing 表")
 
+                # 创建 post_insights 表
+                cursor.execute(self._get_post_insights_table_sql())
+                logger.info("已创建或确认 post_insights 表")
+
                 conn.commit()
                 logger.info("数据库表初始化完成")
 
@@ -194,6 +198,28 @@ class DatabaseManager:
         COMMENT='Twitter帖子后处理解读结果表';
         """
 
+    def _get_post_insights_table_sql(self) -> str:
+        """获取创建 post_insights 表的SQL"""
+        return """
+        CREATE TABLE IF NOT EXISTS `post_insights` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `post_id` INT NOT NULL COMMENT '关联到twitter_posts表的ID',
+          `status` ENUM('pending', 'completed', 'failed') NOT NULL DEFAULT 'pending' COMMENT '分析状态',
+          `model_name` VARCHAR(255) COMMENT '使用的模型名称',
+          `summary` VARCHAR(512) COMMENT 'LLM生成的单句摘要',
+          `tag` VARCHAR(100) COMMENT 'LLM生成的内容标签',
+          `content_type` VARCHAR(100) COMMENT 'LLM识别的内容类型',
+          `entities` JSON COMMENT 'LLM提取的提及实体',
+          `interpretation` TEXT COMMENT 'LLM生成的深度解读内容',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY `uniq_post_id` (`post_id`),
+          INDEX `idx_status` (`status`),
+          INDEX `idx_tag` (`tag`),
+          CONSTRAINT `fk_insights_post` FOREIGN KEY (`post_id`) REFERENCES `twitter_posts` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='帖子洞察分析结果表';
+        """
+
     def recreate_tables(self):
         """删除并重新创建所有表"""
         try:
@@ -203,6 +229,7 @@ class DatabaseManager:
                 # 删除表（注意外键约束的顺序）
                 cursor.execute("DROP TABLE IF EXISTS intelligence_reports")
                 cursor.execute("DROP TABLE IF EXISTS postprocessing")
+                cursor.execute("DROP TABLE IF EXISTS post_insights")
                 cursor.execute("DROP TABLE IF EXISTS twitter_user_profiles")
                 cursor.execute("DROP TABLE IF EXISTS post_analysis")
                 cursor.execute("DROP TABLE IF EXISTS twitter_posts")
@@ -807,4 +834,61 @@ class DatabaseManager:
 
         except Exception as e:
             logger.error(f"保存情报报告失败: {e}")
+            return False
+
+    def get_posts_for_insight_analysis(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """获取待进行洞察分析的帖子列表"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                sql = """
+                SELECT p.id, p.post_content, p.media_urls, p.user_table_id, u.user_id
+                FROM twitter_posts p
+                JOIN twitter_users u ON p.user_table_id = u.id
+                LEFT JOIN post_insights pi ON p.id = pi.post_id
+                WHERE pi.id IS NULL
+                ORDER BY p.id DESC
+                LIMIT %s
+                """
+                cursor.execute(sql, (limit,))
+                posts = cursor.fetchall()
+                logger.info(f"获取到 {len(posts)} 个待洞察分析的帖子")
+                return posts
+        except Exception as e:
+            logger.error(f"获取待洞察分析帖子失败: {e}")
+            return []
+
+    def save_post_insight(self, post_id: int, insight_data: Dict[str, Any], status: str = 'completed') -> bool:
+        """保存帖子洞察分析结果"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                sql = """
+                INSERT INTO post_insights (post_id, status, model_name, summary, tag, content_type, entities, interpretation, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                    status = VALUES(status),
+                    model_name = VALUES(model_name),
+                    summary = VALUES(summary),
+                    tag = VALUES(tag),
+                    content_type = VALUES(content_type),
+                    entities = VALUES(entities),
+                    interpretation = VALUES(interpretation),
+                    updated_at = NOW()
+                """
+                import json
+                cursor.execute(sql, (
+                    post_id,
+                    status,
+                    insight_data.get('model_name'),
+                    insight_data.get('llm_summary'),
+                    insight_data.get('post_tag'),
+                    insight_data.get('content_type'),
+                    json.dumps(insight_data.get('mentioned_entities', []), ensure_ascii=False),
+                    insight_data.get('deep_interpretation')
+                ))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"保存帖子洞察失败: {e}")
             return False
