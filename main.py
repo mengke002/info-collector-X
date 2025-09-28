@@ -45,6 +45,8 @@ def main():
                        help='最大并发线程数（CLI参数优先生效，其次为环境变量/配置文件）')
 
     # 分析任务相关参数
+    parser.add_argument('--batch-size', type=int, default=1000,
+                       help='批处理大小（用于帖子洞察分析）')
     parser.add_argument('--user-limit', type=int, default=50,
                        help='用户分析数量限制')
     parser.add_argument('--days', type=int, default=30,
@@ -113,7 +115,7 @@ def main():
             report_limit=args.report_limit
         )
     elif args.task == 'post_insights':
-        result = run_post_insights_task(hours_back=args.hours_back, batch_size=1000)
+        result = run_post_insights_task(hours_back=args.hours_back, batch_size=args.batch_size)
     else:
         print(f"未知任务类型: {args.task}")
         sys.exit(1)
