@@ -84,8 +84,8 @@ class IntelligenceReportGenerator:
 
         models: List[str] = []
 
-        # 先尝试从 llm_client 的 models 属性获取
-        raw_models = getattr(self.llm_client, 'models', None) or []
+        # 先尝试从 llm_client 的 report_models 属性获取
+        raw_models = getattr(self.llm_client, 'report_models', None) or []
         for model_name in raw_models:
             if model_name and model_name not in models:
                 models.append(model_name)
