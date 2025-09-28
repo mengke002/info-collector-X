@@ -124,7 +124,7 @@ class IntelligenceReportGenerator:
     def format_enriched_posts_for_smart_llm(self, enriched_posts: List[Dict[str, Any]]) -> Tuple[str, List[Dict[str, Any]]]:
         """
         为Smart LLM格式化富化后的帖子数据
-        充分利用 PostInsightsAnalyzer 的输出结果
+        只包含核心内容以压缩上下文
 
         Args:
             enriched_posts: 富化后的帖子数据列表
@@ -142,66 +142,23 @@ class IntelligenceReportGenerator:
             # 基础信息
             user_id = post_data.get('user_id', 'unknown')
             post_url = post_data.get('post_url', '未知')
-            published_at = post_data.get('published_at')
-            pub_str = published_at.strftime('%Y-%m-%d %H:%M') if published_at else '未知时间'
-
-            # 从 PostInsightsAnalyzer 获取的富化数据
-            llm_summary = post_data.get('llm_summary', '无摘要')
-            post_tag = post_data.get('post_tag', '无标签')
-            content_type = post_data.get('content_type', '未知类型')
-
-            # 提及实体信息
-            mentioned_entities = post_data.get('mentioned_entities')
-            entities_str = "无"
-            if mentioned_entities and mentioned_entities != 'null':
-                try:
-                    if isinstance(mentioned_entities, str):
-                        entities_list = json.loads(mentioned_entities)
-                    else:
-                        entities_list = mentioned_entities
-                    entities_str = ", ".join([
-                        f"{entity.get('entity_name')} ({entity.get('entity_type')})"
-                        for entity in entities_list
-                        if entity and entity.get('entity_name')
-                    ])
-                    if not entities_str:
-                        entities_str = "无"
-                except (json.JSONDecodeError, TypeError):
-                    entities_str = "无"
-
-            # 深度洞察 - 这是最重要的部分
+            
+            # 核心内容
+            original_content = post_data.get('post_content', '')
             deep_interpretation = (post_data.get('deep_interpretation') or '').strip()
             if not deep_interpretation:
                 deep_interpretation = "无深度洞察"
-            elif len(deep_interpretation) > 2000:
-                deep_interpretation = deep_interpretation[:2000] + "..."
-
-            # 图片描述（如果有）
-            image_description = post_data.get('image_description', '')
-            image_section = ""
-            if image_description:
-                image_section = f"- 图片描述: {self._truncate(image_description, 300)}\n"
-
-            # 原始内容节选
-            original_content = post_data.get('post_content', '')
-            content_excerpt = self._truncate(original_content, 500)
 
             # 构建单个帖子的上下文块
             block = f"""
 [Source: {sid} | User: @{user_id}]
-- 发布时间: {pub_str}
-- 内容类型: {content_type}
-- 内容标签: {post_tag}
-- 提及实体: {entities_str}
-- LLM摘要: {llm_summary}
-{image_section}- 深度洞察:
+- 帖子内容:
+'''
+{original_content}
+'''
+- 深度洞察:
 '''
 {deep_interpretation}
-'''
-- 帖子链接: {post_url}
-- 原始内容节选:
-'''
-{content_excerpt}
 '''
 """
 
@@ -213,13 +170,15 @@ class IntelligenceReportGenerator:
             context_parts.append(block)
             total_chars += len(block)
 
-            # 添加到源映射
+            # 添加到源映射，用于后续生成来源清单
+            # 即使上下文简化了，来源清单依然需要这些信息
+            llm_summary = post_data.get('llm_summary', '无摘要')
             sources.append({
                 'sid': sid,
-                'title': self._truncate(llm_summary, 100),
+                'title': self._truncate(llm_summary or original_content, 100),
                 'link': post_url,
                 'nickname': user_id,
-                'excerpt': self._truncate(content_excerpt, 120)
+                'excerpt': self._truncate(original_content, 120)
             })
 
         return "\n---\n".join(context_parts), sources
@@ -246,21 +205,15 @@ class IntelligenceReportGenerator:
         # 定义精确的数据格式描述，以匹配 format_enriched_posts_for_smart_llm 的输出
         # 这部分内容旨在告知LLM其接收到的`formatted_context`中每个帖子的详细结构
         accurate_data_format_description = """# Input Data Format:
-你将收到一系列经过预处理的、信息丰富的帖子摘要，结构如下。请重点利用`深度洞察`部分进行分析。
+你将收到一系列经过预处理的帖子，每条包含原始内容和AI生成的深度洞察。结构如下。请综合利用这两部分信息进行分析。
 `[Source: T_id | User: user_handle]`
-- 发布时间: {发布时间}
-- 内容类型: {LLM识别的内容类型}
-- 内容标签: {LLM生成的内容标签}
-- 提及实体: {LLM提取的实体}
-- LLM摘要: {LLM生成的单句摘要}
+- 帖子内容:
+'''
+{帖子的完整原始内容}
+'''
 - 深度洞察:
 '''
 {LLM生成的深度解读，这是你分析的核心依据}
-'''
-- 帖子链接: {帖子原始链接}
-- 原始内容节选:
-'''
-{帖子原始内容的节选}
 '''"""
 
         # 核心提示词模板

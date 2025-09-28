@@ -199,7 +199,7 @@ class Config:
             'report_models': report_models,
             'openai_api_key': openai_api_key,
             'openai_base_url': self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1'),
-            'max_content_length': self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 100000, int),
+            'max_content_length': self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 1000000, int),
         }
 
     def get_notion_config(self) -> Dict[str, Any]:
