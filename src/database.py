@@ -836,21 +836,23 @@ class DatabaseManager:
             logger.error(f"保存情报报告失败: {e}")
             return False
 
-    def get_posts_for_insight_analysis(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_posts_for_insight_analysis(self, hours_back: int, limit: int = 1000) -> List[Dict[str, Any]]:
         """获取待进行洞察分析的帖子列表"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cutoff_time = datetime.now() - timedelta(hours=hours_back)
                 sql = """
                 SELECT p.id, p.post_content, p.media_urls, p.user_table_id, u.user_id
                 FROM twitter_posts p
                 JOIN twitter_users u ON p.user_table_id = u.id
                 LEFT JOIN post_insights pi ON p.id = pi.post_id
                 WHERE pi.id IS NULL
+                  AND p.published_at >= %s
                 ORDER BY p.id DESC
                 LIMIT %s
                 """
-                cursor.execute(sql, (limit,))
+                cursor.execute(sql, (cutoff_time, limit,))
                 posts = cursor.fetchall()
                 logger.info(f"获取到 {len(posts)} 个待洞察分析的帖子")
                 return posts

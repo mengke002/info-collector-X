@@ -121,7 +121,7 @@ def main():
     elif args.task == 'postprocess':
         result = run_postprocess_task(hours_back=args.hours_back)
     elif args.task == 'post_insights':
-        result = run_post_insights_task(batch_size=args.batch_size)
+        result = run_post_insights_task(hours_back=args.hours_back, batch_size=args.batch_size)
     else:
         print(f"未知任务类型: {args.task}")
         sys.exit(1)

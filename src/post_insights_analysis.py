@@ -158,12 +158,12 @@ class PostInsightsAnalyzer:
             logger.error(f"分析帖子 {post_id} 时发生异常: {e}")
             return post_id, {'error': str(e)}
 
-    def run_analysis(self, batch_size: int = 100) -> Dict[str, Any]:
+    def run_analysis(self, hours_back: int, batch_size: int = 1000) -> Dict[str, Any]:
         """运行帖子洞察分析任务"""
-        logger.info(f"开始运行帖子洞察分析任务，批次大小: {batch_size}")
+        logger.info(f"开始运行帖子洞察分析任务，回溯 {hours_back} 小时，批次大小: {batch_size}")
         
         try:
-            posts = self.db_manager.get_posts_for_insight_analysis(limit=batch_size)
+            posts = self.db_manager.get_posts_for_insight_analysis(hours_back=hours_back, limit=batch_size)
             if not posts:
                 logger.info("没有需要进行洞察分析的帖子")
                 return {'total': 0, 'success': 0, 'failed': 0}
@@ -196,11 +196,11 @@ class PostInsightsAnalyzer:
             logger.error(f"帖子洞察分析任务执行失败: {e}", exc_info=True)
             return {'total': 0, 'success': 0, 'failed': 0, 'error': str(e)}
 
-def run_post_insights_analysis_task(batch_size: int = 100) -> Dict[str, Any]:
+def run_post_insights_analysis_task(hours_back: int, batch_size: int = 1000) -> Dict[str, Any]:
     """便捷函数：运行帖子洞察分析"""
     try:
         analyzer = PostInsightsAnalyzer()
-        return analyzer.run_analysis(batch_size=batch_size)
+        return analyzer.run_analysis(hours_back=hours_back, batch_size=batch_size)
     except Exception as e:
         logger.error(f"创建PostInsightsAnalyzer失败: {e}")
         return {'total': 0, 'success': 0, 'failed': 0, 'error': str(e)}

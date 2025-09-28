@@ -439,11 +439,11 @@ def run_kol_report_task(user_id: int, days: int = 30) -> Dict[str, Any]:
             'user_id': user_id,
         }
 
-def run_post_insights_task(batch_size: int = 100) -> Dict[str, Any]:
+def run_post_insights_task(hours_back: int, batch_size: int = 1000) -> Dict[str, Any]:
     """执行帖子洞察分析（新版）任务"""
     try:
-        logger.info(f"开始执行帖子洞察分析任务，批次大小: {batch_size}")
-        result = run_insights_task(batch_size)
+        logger.info(f"开始执行帖子洞察分析任务，回溯 {hours_back} 小时，批次大小: {batch_size}")
+        result = run_insights_task(hours_back=hours_back, batch_size=batch_size)
 
         return {
             'success': True,
