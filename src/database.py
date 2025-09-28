@@ -847,7 +847,7 @@ class DatabaseManager:
                 FROM twitter_posts p
                 JOIN twitter_users u ON p.user_table_id = u.id
                 LEFT JOIN post_insights pi ON p.id = pi.post_id
-                WHERE pi.id IS NULL
+                WHERE (pi.id IS NULL OR pi.status = 'failed')
                   AND p.published_at >= %s
                 ORDER BY p.id DESC
                 LIMIT %s
