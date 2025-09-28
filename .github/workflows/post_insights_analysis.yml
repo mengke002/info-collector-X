@@ -8,12 +8,12 @@ on:
       batch_size:
         description: '批处理大小'
         required: false
-        default: '200'
+        default: '1000'
         type: choice
         options:
-          - '100'
-          - '200'
           - '500'
+          - '1000'
+          - '1500'
       hours_back:
         description: '回溯小时数'
         required: false
@@ -55,4 +55,4 @@ jobs:
         LLM_FAST_VLM_FALLBACK_NAME: ${{ secrets.LLM_FAST_VLM_FALLBACK_NAME }}
         LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       run: |
-        python3.12 main.py --task post_insights --batch-size ${{ github.event.inputs.batch_size || '500' }} --hours-back ${{ github.event.inputs.hours_back || '36' }}
+        python3.12 main.py --task post_insights --batch-size ${{ github.event.inputs.batch_size || '1000' }} --hours-back ${{ github.event.inputs.hours_back || '36' }}
