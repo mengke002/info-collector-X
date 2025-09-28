@@ -339,20 +339,26 @@ def run_intelligence_report_task(hours: int = 24, limit: int = 300) -> Dict[str,
         result = run_daily_intelligence_report(hours, limit)
 
         if result['success']:
+            items_analyzed = result.get('items_analyzed', 0)
+            model_reports_count = len(result.get('model_reports', []))
+
             return {
                 'success': True,
                 'task_type': 'intelligence_report',
                 'report_title': result.get('report_title'),
-                'posts_analyzed': result.get('posts_count', 0),
+                'posts_analyzed': items_analyzed,
                 'time_range': result.get('time_range'),
-                'message': f"情报报告生成成功: 分析了{result.get('posts_count', 0)}条帖子"
+                'model_reports_count': model_reports_count,
+                'notion_push': result.get('notion_push'),
+                'message': f"情报报告生成成功: 使用{model_reports_count}个模型分析了{items_analyzed}条帖子"
             }
         else:
             return {
                 'success': False,
                 'error': result.get('error'),
                 'task_type': 'intelligence_report',
-                'posts_analyzed': result.get('posts_count', 0),
+                'posts_analyzed': result.get('items_analyzed', 0),
+                'failures': result.get('failures', [])
             }
 
     except Exception as e:
@@ -385,6 +391,7 @@ def run_kol_report_task(user_id: int, days: int = 30) -> Dict[str, Any]:
                 'task_type': 'kol_report',
                 'report_title': result.get('report_title'),
                 'user_handle': result.get('user_handle'),
+                'report_content': result.get('report_content'),
                 'message': f"KOL报告生成成功: @{result.get('user_handle')}"
             }
         else:
@@ -403,6 +410,7 @@ def run_kol_report_task(user_id: int, days: int = 30) -> Dict[str, Any]:
             'task_type': 'kol_report',
             'user_id': user_id,
         }
+
 
 def run_post_insights_task(hours_back: int, batch_size: int = 1000) -> Dict[str, Any]:
     """执行帖子洞察分析（新版）任务"""

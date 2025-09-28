@@ -1,0 +1,153 @@
+name: X/Twitter 情报报告生成
+
+on:
+  schedule:
+    # 北京时间每日 09:00、15:00、21:00 生成情报报告（UTC: 1,7,13）
+    - cron: '0 1,7,13 * * *'
+    # 每周日北京时间 08:00 生成 KOL 报告（UTC: 0）- 已禁用
+    # - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      report_type:
+        description: '报告类型'
+        required: true
+        default: 'intelligence'
+        type: choice
+        options:
+        - intelligence
+        - kol
+      hours:
+        description: '情报报告时间范围（小时）'
+        required: false
+        default: '24'
+        type: choice
+        options:
+          - '6'
+          - '12'
+          - '24'
+          - '48'
+          - '72'
+      report_limit:
+        description: '情报报告分析的最大帖子数量'
+        required: false
+        default: '300'
+        type: choice
+        options:
+          - '200'
+          - '300'
+          - '500'
+          - '1000'
+      user_id:
+        description: 'KOL报告用户ID'
+        required: false
+        default: ''
+      days:
+        description: 'KOL报告分析天数'
+        required: false
+        default: '30'
+        type: choice
+        options:
+          - '7'
+          - '15'
+          - '30'
+          - '60'
+          - '90'
+
+jobs:
+  intelligence_report:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 1,7,13 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.report_type == 'intelligence')
+
+    env:
+      # 数据库配置
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD || secrets.MYSQL_PASSWORD }}
+      MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD || secrets.DB_PASSWORD }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      # LLM配置 - 支持多模型并行
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
+      LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_VLM_MODEL_NAME: ${{ secrets.LLM_VLM_MODEL_NAME }}
+      LLM_REPORT_MODELS: ${{ secrets.LLM_REPORT_MODELS }}
+      LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+      LLM_PRIORITY_MODEL: ${{ secrets.LLM_PRIORITY_MODEL }}
+      # Notion 集成配置
+      NOTION_INTEGRATION_TOKEN: ${{ secrets.NOTION_INTEGRATION_TOKEN }}
+      NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+      # 其他配置
+      INTERPRETATION_MODE: ${{ vars.INTERPRETATION_MODE || 'light' }}
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: 安装Python依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 执行情报报告生成任务
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then \
+          python3.12 main.py --task intelligence_report --hours ${{ github.event.inputs.hours }} --report-limit ${{ github.event.inputs.report_limit }}; \
+        else \
+          python3.12 main.py --task intelligence_report --hours 24 --report-limit 300; \
+        fi
+
+  kol_report:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 0 * * 0' || (github.event_name == 'workflow_dispatch' && github.event.inputs.report_type == 'kol')
+
+    env:
+      # 数据库配置
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD || secrets.MYSQL_PASSWORD }}
+      MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD || secrets.DB_PASSWORD }}
+      DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      # LLM配置
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      LLM_FAST_MODEL_NAME: ${{ secrets.LLM_FAST_MODEL_NAME }}
+      LLM_SMART_MODEL_NAME: ${{ secrets.LLM_SMART_MODEL_NAME }}
+      LLM_VLM_MODEL_NAME: ${{ secrets.LLM_VLM_MODEL_NAME }}
+      LLM_REPORT_MODELS: ${{ secrets.LLM_REPORT_MODELS }}
+      LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+      LLM_PRIORITY_MODEL: ${{ secrets.LLM_PRIORITY_MODEL }}
+      # Notion 集成配置
+      NOTION_INTEGRATION_TOKEN: ${{ secrets.NOTION_INTEGRATION_TOKEN }}
+      NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: 安装Python依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 执行KOL报告生成任务
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.user_id }}" ]; then \
+          python3.12 main.py --task kol_report --user-id ${{ github.event.inputs.user_id }} --days ${{ github.event.inputs.days }}; \
+        else \
+          python3.12 main.py --task kol_report --days 30; \
+        fi

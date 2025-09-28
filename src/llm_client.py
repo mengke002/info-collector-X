@@ -19,29 +19,25 @@ class LLMClient:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
 
-        # 从配置文件获取配置（按优先级：环境变量 > config.ini > 默认值）
         llm_config = config.get_llm_config()
         self.api_key = llm_config.get('openai_api_key')
         self.base_url = llm_config.get('openai_base_url', 'https://api.openai.com/v1')
 
-        # 获取不同类型的模型配置
-        self.fast_model = llm_config.get('fast_model_name', 'gpt-4.1')
+        self.fast_model = llm_config.get('fast_model_name', 'gpt-3.5-turbo-16k')
         self.vlm_model = llm_config.get('fast_vlm_model_name', 'gpt-4-vision-preview')
         self.smart_model = llm_config.get('smart_model_name', 'gpt-4.1')
+        self.report_models = llm_config.get('report_models', [])
 
         if not self.api_key:
             raise ValueError("未找到OPENAI_API_KEY配置，请在环境变量或config.ini中设置")
 
-        # 初始化OpenAI客户端
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url
-        )
+        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
         self.logger.info(f"LLM客户端初始化成功")
         self.logger.info(f"Fast Model: {self.fast_model}")
         self.logger.info(f"VLM Model: {self.vlm_model}")
         self.logger.info(f"Smart Model: {self.smart_model}")
+        self.logger.info(f"Report Models: {self.report_models}")
 
     def call_fast_model(self, prompt: str, temperature: float = 0.1, max_retries: int = 3) -> Dict[str, Any]:
         """
@@ -50,12 +46,35 @@ class LLMClient:
         """
         return self._make_request(prompt, self.fast_model, temperature, max_retries)
 
-    def call_smart_model(self, prompt: str, temperature: float = 0.5, max_retries: int = 3) -> Dict[str, Any]:
-        """
-        调用智能模型进行深度分析
-        适用于：报告生成、深度洞察、综合分析等复杂任务
-        """
-        return self._make_request(prompt, self.smart_model, temperature, max_retries)
+    def call_smart_model(self, prompt: str, temperature: float = 0.5, max_retries: int = 3, model_override: Optional[str] = None) -> Dict[str, Any]:
+        if model_override:
+            return self._make_request(prompt, model_override, temperature, max_retries)
+        
+        if not self.report_models:
+            # Fallback to old smart_model_name if report_models is empty
+            llm_config = config.get_llm_config()
+            smart_model = llm_config.get('smart_model_name')
+            if smart_model:
+                return self._make_request(prompt, smart_model, temperature, max_retries)
+            raise ValueError("未配置任何可用于生成报告的report_models或smart_model_name")
+
+        last_response: Dict[str, Any] = {
+            'success': False,
+            'error': '所有报告模型均调用失败'
+        }
+
+        for index, model_name in enumerate(self.report_models):
+            result = self._make_request(prompt, model_name, temperature, max_retries)
+            if result.get('success'):
+                return result
+
+            last_response = result
+            if index < len(self.report_models) - 1:
+                fallback_target = self.report_models[index + 1]
+                self.logger.warning(
+                    f"模型 {model_name} 在 {max_retries} 次尝试后失败，将回退至 {fallback_target}"
+                )
+        return last_response
 
     def call_vlm(self, prompt: str, image_data_list: List[Dict[str, Any]],
                  model_name: Optional[str] = None, temperature: float = 0.3,
@@ -186,6 +205,7 @@ class LLMClient:
                         'model': used_model,
                         'total_attempts': max_retries
                     }
+
 
     def _make_request(self, prompt: str, model_name: str, temperature: float, max_retries: int = 3) -> Dict[str, Any]:
         """

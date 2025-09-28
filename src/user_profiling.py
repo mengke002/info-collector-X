@@ -224,9 +224,9 @@ class UserProfileAnalyzer:
                 SELECT DISTINCT u.id, u.user_id
                 FROM twitter_users u
                 JOIN twitter_posts p ON u.id = p.user_table_id
-                JOIN post_analysis pa ON p.id = pa.post_id
+                JOIN post_insights pi ON p.id = pi.post_id
                 LEFT JOIN twitter_user_profiles up ON u.id = up.user_table_id
-                WHERE pa.analysis_status = 'completed'
+                WHERE pi.status = 'completed'
                   AND p.published_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
                   AND (up.id IS NULL OR up.generated_at < DATE_SUB(NOW(), INTERVAL 7 DAY))
                   AND u.crawl_status != 'quarantined'

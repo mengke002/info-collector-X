@@ -5,7 +5,7 @@
 import os
 import configparser
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,18 @@ class Config:
             pass
 
         return default_value
+    
+    def _parse_model_list(self, raw_value: str) -> List[str]:
+        """将逗号分隔的模型字符串解析为有序且去重的列表"""
+        if not raw_value:
+            return []
+
+        models: List[str] = []
+        for item in raw_value.split(','):
+            candidate = item.strip()
+            if candidate and candidate not in models:
+                models.append(candidate)
+        return models
 
     def get_database_config(self) -> Dict[str, Any]:
         """获取数据库配置（环境变量 > config.ini > 默认值）。
@@ -155,67 +167,41 @@ class Config:
         }
 
     def get_analysis_config(self) -> Dict[str, Any]:
-        """获取内容解读配置（目前支持选择提示词模式）"""
-        mode = self._get_config_value('analysis', 'interpretation_mode', 'INTERPRETATION_MODE', 'light', str)
-
-        if isinstance(mode, str):
-            normalized_mode = mode.strip().lower()
-        else:
-            normalized_mode = 'light'
-
-        if normalized_mode not in {'light', 'heavy'}:
-            logger.warning(
-                "interpretation_mode 配置值 %s 无效，将回退到 light 模式",
-                mode
-            )
-            normalized_mode = 'light'
-
+        """获取分析任务配置"""
         return {
-            'interpretation_mode': normalized_mode
+            'interpretation_mode': self._get_config_value('analysis', 'interpretation_mode', 'INTERPRETATION_MODE', 'light', str),
+            'hours_back_daily': self._get_config_value('analysis', 'hours_back_daily', 'ANALYSIS_HOURS_BACK_DAILY', 24, int),
+            'days_back_weekly': self._get_config_value('analysis', 'days_back_weekly', 'ANALYSIS_DAYS_BACK_WEEKLY', 7, int),
+            'days_back_kol': self._get_config_value('analysis', 'days_back_kol', 'ANALYSIS_DAYS_BACK_KOL', 30, int),
         }
 
     def get_llm_config(self) -> Dict[str, Any]:
         """获取LLM配置，优先级：环境变量 > config.ini > 默认值"""
-        # API密钥优先从环境变量获取，其次从 config.ini 获取
         openai_api_key = self._get_config_value('llm', 'openai_api_key', 'OPENAI_API_KEY', None)
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY 未设置。请在环境变量或config.ini中设置LLM功能需要API密钥。")
 
+        models_raw = self._get_config_value('llm', 'report_models', 'LLM_REPORT_MODELS', '', str)
+        report_models = self._parse_model_list(models_raw)
+        
+        legacy_smart = self._get_config_value('llm', 'smart_model_name', 'LLM_SMART_MODEL_NAME', '', str)
+        if not report_models and legacy_smart:
+            report_models.append(legacy_smart)
+
         return {
-            # 快速模型配置
             'fast_model_name': self._get_config_value('llm', 'fast_model_name', 'LLM_FAST_MODEL_NAME', 'gpt-3.5-turbo-16k'),
-
-            # 视觉多模态模型配置
             'fast_vlm_model_name': self._get_config_value('llm', 'fast_vlm_model_name', 'LLM_FAST_VLM_NAME', 'gpt-4-vision-preview'),
-            'fast_vlm_fallback_model_name': self._get_config_value('llm', 'fast_vlm_fallback_model_name', 'LLM_FAST_VLM_FALLBACK_NAME', 'gpt-4-vision-preview'),
-
-            # 智能模型配置
-            'smart_model_name': self._get_config_value('llm', 'smart_model_name', 'LLM_SMART_MODEL_NAME', 'gpt-4-turbo'),
-
-            # API配置
+            'report_models': report_models,
             'openai_api_key': openai_api_key,
             'openai_base_url': self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1'),
             'max_content_length': self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 100000, int),
         }
 
-    def get_fast_model_config(self) -> Dict[str, str]:
-        """获取快速模型配置"""
-        llm_config = self.get_llm_config()
+    def get_notion_config(self) -> Dict[str, Any]:
+        """获取Notion集成配置"""
         return {
-            'provider': 'openai',
-            'model_name': llm_config['fast_model_name'],
-            'api_key': llm_config['openai_api_key'],
-            'base_url': llm_config['openai_base_url']
-        }
-
-    def get_smart_model_config(self) -> Dict[str, str]:
-        """获取智能模型配置"""
-        llm_config = self.get_llm_config()
-        return {
-            'provider': 'openai',
-            'model_name': llm_config['smart_model_name'],
-            'api_key': llm_config['openai_api_key'],
-            'base_url': llm_config['openai_base_url']
+            'integration_token': self._get_config_value('notion', 'integration_token', 'NOTION_INTEGRATION_TOKEN', None),
+            'parent_page_id': self._get_config_value('notion', 'parent_page_id', 'NOTION_PARENT_PAGE_ID', None)
         }
 
     def get_postprocessing_config(self) -> Dict[str, int]:
