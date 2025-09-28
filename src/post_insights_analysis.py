@@ -35,21 +35,24 @@ class PostInsightsAnalyzer:
     def _robust_json_parser(self, raw_content: str) -> Optional[Dict[str, Any]]:
         """健壮的JSON解析器，用于处理LLM可能返回的不规范格式"""
         try:
-            # 1. 尝试直接解析
+            # 第一步：尝试直接解析
             return json.loads(raw_content)
         except json.JSONDecodeError:
-            # 2. 如果失败，使用正则表达式提取被包裹的JSON
-            logger.warning("直接解析JSON失败，尝试使用正则提取...")
+            # 第二步：如果失败，使用正则提取并清理
+            logger.warning("直接解析JSON失败，尝试使用正则提取并清理...")
             json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
-            if json_match:
-                json_string = json_match.group(0)
-                try:
-                    return json.loads(json_string)
-                except json.JSONDecodeError as e:
-                    logger.error(f"正则提取后解析JSON仍然失败: {e}")
-                    return None
-            else:
+            if not json_match:
                 logger.error("无法从LLM响应中找到任何JSON对象")
+                return None
+
+            json_string = json_match.group(0)
+            cleaned_string = re.sub(r",\s*([\}\]])", r"\1", json_string)
+
+            try:
+                # 第三步：尝试解析清理后的字符串
+                return json.loads(cleaned_string)
+            except json.JSONDecodeError as e:
+                logger.error(f"最终解析JSON失败: {e}")
                 return None
 
     def get_unified_text_prompt(self, post_text: str) -> str:
