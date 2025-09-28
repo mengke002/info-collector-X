@@ -55,4 +55,4 @@ jobs:
         LLM_FAST_VLM_FALLBACK_NAME: ${{ secrets.LLM_FAST_VLM_FALLBACK_NAME }}
         LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
       run: |
-        python3.12 main.py --task post_insights --batch-size ${{ github.event.inputs.batch_size || '200' }} --hours-back ${{ github.event.inputs.hours_back || '36' }}
+        python3.12 main.py --task post_insights --batch-size ${{ github.event.inputs.batch_size || '500' }} --hours-back ${{ github.event.inputs.hours_back || '36' }}
