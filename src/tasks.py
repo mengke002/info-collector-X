@@ -9,10 +9,8 @@ from .database import DatabaseManager
 from .config import config as app_config
 
 # 导入分析模块
-from .post_enrichment import run_post_enrichment
 from .user_profiling import run_user_profiling
 from .intelligence_reports import run_daily_intelligence_report, run_kol_report
-from .post_processor import TwitterPostProcessor
 from .post_insights_analysis import run_post_insights_analysis_task as run_insights_task
 
 logger = logging.getLogger(__name__)
@@ -289,39 +287,6 @@ def run_init_users_task(csv_file_path: str) -> Dict[str, Any]:
 
 # 分析任务函数
 
-def run_post_enrichment_task(batch_size: int = 100, max_workers: int = 3) -> Dict[str, Any]:
-    """执行帖子富化分析任务
-
-    Args:
-        batch_size: 批处理大小
-        max_workers: 最大并发数
-
-    Returns:
-        任务执行结果
-    """
-    try:
-        logger.info(f"开始执行帖子富化分析任务，批次大小: {batch_size}, 并发数: {max_workers}")
-        result = run_post_enrichment(batch_size, max_workers)
-
-        return {
-            'success': True,
-            'task_type': 'post_enrichment',
-            'posts_processed': result.get('total', 0),
-            'posts_success': result.get('success', 0),
-            'posts_failed': result.get('failed', 0),
-            'message': f"帖子富化分析完成: 处理{result.get('total', 0)}条，成功{result.get('success', 0)}条"
-        }
-
-    except Exception as e:
-        logger.error(f"帖子富化分析任务执行失败: {e}")
-        return {
-            'success': False,
-            'error': str(e),
-            'task_type': 'post_enrichment',
-            'posts_processed': 0,
-            'posts_success': 0,
-            'posts_failed': 0,
-        }
 
 
 def run_user_profiling_analysis_task(limit: int = 50, days: int = 30) -> Dict[str, Any]:
@@ -466,17 +431,13 @@ def run_post_insights_task(hours_back: int, batch_size: int = 1000) -> Dict[str,
         }
 
 
-def run_full_analysis_pipeline(post_batch_size: int = 100,
-                              post_max_workers: int = 3,
-                              user_limit: int = 50,
+def run_full_analysis_pipeline(user_limit: int = 50,
                               user_days: int = 30,
                               report_hours: int = 24,
                               report_limit: int = 300) -> Dict[str, Any]:
     """执行完整的分析挖掘流水线
 
     Args:
-        post_batch_size: 帖子富化批次大小
-        post_max_workers: 帖子富化并发数
         user_limit: 用户档案分析数量
         user_days: 用户档案分析天数
         report_hours: 报告时间范围（小时）
@@ -490,29 +451,16 @@ def run_full_analysis_pipeline(post_batch_size: int = 100,
     pipeline_results = {}
     overall_success = True
 
-    # 第一步：帖子富化分析
-    logger.info("=== 第一步：执行帖子富化分析 ===")
-    enrichment_result = run_post_enrichment_task(post_batch_size, post_max_workers)
-    pipeline_results['post_enrichment'] = enrichment_result
-    if not enrichment_result['success']:
-        overall_success = False
-        logger.error("帖子富化分析失败，终止流水线执行")
-        return {
-            'success': False,
-            'pipeline_results': pipeline_results,
-            'error': '帖子富化分析失败'
-        }
-
-    # 第二步：用户档案分析
-    logger.info("=== 第二步：执行用户档案分析 ===")
+    # 第一步：用户档案分析
+    logger.info("=== 第一步：执行用户档案分析 ===")
     profiling_result = run_user_profiling_analysis_task(user_limit, user_days)
     pipeline_results['user_profiling'] = profiling_result
     if not profiling_result['success']:
         overall_success = False
         logger.warning("用户档案分析失败，但继续执行报告生成")
 
-    # 第三步：情报报告生成
-    logger.info("=== 第三步：执行情报报告生成 ===")
+    # 第二步：情报报告生成
+    logger.info("=== 第二步：执行情报报告生成 ===")
     report_result = run_intelligence_report_task(report_hours, report_limit)
     pipeline_results['intelligence_report'] = report_result
     if not report_result['success']:
@@ -555,45 +503,3 @@ def test_crawler_connection() -> Dict[str, Any]:
         }
 
 
-def run_postprocess_task(hours_back: int = 36) -> Dict[str, Any]:
-    """执行帖子后处理任务
-
-    Args:
-        hours_back: 回溯小时数
-
-    Returns:
-        任务执行结果
-    """
-    try:
-        logger.info(f"开始执行帖子后处理任务，回溯 {hours_back} 小时")
-
-        processor = TwitterPostProcessor()
-        result = processor.process_posts(hours_back)
-
-        # 获取处理统计信息
-        stats = processor.get_processing_stats(hours_back)
-
-        return {
-            'success': True,
-            'task_type': 'postprocess',
-            'hours_back': hours_back,
-            'posts_total': result['total'],
-            'posts_success': result['success'],
-            'posts_failed': result['failed'],
-            'success_rate': round(result['success'] / max(result['total'], 1) * 100, 2),
-            'processing_stats': stats,
-            'message': f"帖子后处理完成: 处理{result['total']}条，成功{result['success']}条，失败{result['failed']}条"
-        }
-
-    except Exception as e:
-        logger.error(f"帖子后处理任务执行失败: {e}")
-        return {
-            'success': False,
-            'error': str(e),
-            'task_type': 'postprocess',
-            'hours_back': hours_back,
-            'posts_total': 0,
-            'posts_success': 0,
-            'posts_failed': 0,
-            'success_rate': 0.0,
-        }
