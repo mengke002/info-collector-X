@@ -60,9 +60,9 @@ class PostInsightsAnalyzer:
 你正在分析一条来自X/Twitter的帖子。你的任务是深入理解其内容，并以一个包含结构化信息和深度解读的JSON格式返回你的分析。
 
 # Input Post:
-'''
+```
 {post_text}
-'''
+```
 
 # Your Task:
 请严格按照以下JSON格式返回你的分析结果。不要添加任何解释性文字。
@@ -89,7 +89,7 @@ class PostInsightsAnalyzer:
 你正在分析一条来自X/Twitter的图文帖子。你的任务是深度融合文本和图片信息，并以一个包含结构化信息和深度解读的JSON格式返回你的分析。
 
 # Input:
-- Post 文本: """{post_text}"""
+- Post 文本: ```{post_text}```
 - 图片: 参考附件
 
 # Your Task:
