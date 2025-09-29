@@ -600,7 +600,13 @@ class DatabaseManager:
             logger.error(f"保存用户画像失败: {e}")
             return False
 
-    def get_enriched_posts_for_report(self, start_time: datetime, end_time: datetime, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_enriched_posts_for_report(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        limit: Optional[int] = None,
+        context_mode: str = 'light'
+    ) -> List[Dict[str, Any]]:
         """获取指定时间范围内的富化帖子用于报告生成
 
         Args:
@@ -615,7 +621,24 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-                sql = """
+                normalized_mode = (context_mode or 'light').lower()
+                if normalized_mode not in {'light', 'full'}:
+                    normalized_mode = 'light'
+
+                has_media_case = (
+                    "CASE WHEN COALESCE(JSON_LENGTH(p.media_urls), 0) > 0 "
+                    "THEN 1 ELSE 0 END AS has_media"
+                )
+
+                if normalized_mode == 'light':
+                    interpretation_select = (
+                        "CASE WHEN COALESCE(JSON_LENGTH(p.media_urls), 0) > 0 "
+                        "THEN pi.interpretation ELSE NULL END AS deep_interpretation"
+                    )
+                else:
+                    interpretation_select = "pi.interpretation AS deep_interpretation"
+
+                sql = f"""
                 SELECT p.id,
                        p.post_content,
                        p.post_url,
@@ -623,11 +646,12 @@ class DatabaseManager:
                        p.post_type,
                        p.media_urls,
                        u.user_id,
+                       {has_media_case},
                        pi.summary AS llm_summary,
                        pi.tag AS post_tag,
                        pi.content_type,
                        pi.entities AS mentioned_entities,
-                       pi.interpretation AS deep_interpretation
+                       {interpretation_select}
                 FROM twitter_posts p
                 JOIN post_insights pi ON p.id = pi.post_id
                 JOIN twitter_users u ON p.user_table_id = u.id
@@ -643,7 +667,9 @@ class DatabaseManager:
                 cursor.execute(sql, (start_time, end_time))
                 posts = cursor.fetchall()
 
-                logger.info(f"获取到时间范围内的 {len(posts)} 条富化帖子用于报告生成")
+                logger.info(
+                    f"获取到时间范围内的 {len(posts)} 条富化帖子用于报告生成 (mode={normalized_mode})"
+                )
                 return posts
 
         except Exception as e:

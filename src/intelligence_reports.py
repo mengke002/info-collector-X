@@ -38,7 +38,17 @@ class IntelligenceReportGenerator:
         self.max_content_length = int(llm_config.get('max_content_length', 380000))
         self.max_llm_concurrency = 3  # 并发模型数量限制
 
-        logger.info("情报报告生成器初始化完成")
+        analysis_config = config.get_analysis_config()
+        context_mode = (analysis_config.get('interpretation_mode') if analysis_config else 'light') or 'light'
+        if not isinstance(context_mode, str):
+            context_mode = 'light'
+        context_mode = context_mode.lower()
+        if context_mode not in {'light', 'full'}:
+            logger.warning(f"未知interpretation_mode配置: {context_mode}, 回退到light模式")
+            context_mode = 'light'
+        self.context_mode = context_mode
+
+        logger.info(f"情报报告生成器初始化完成，context_mode={self.context_mode}")
 
     def _log_task_start(self, task_type: str, **kwargs) -> None:
         """统一的任务开始日志记录"""
@@ -110,6 +120,10 @@ class IntelligenceReportGenerator:
         lower_name = model_name.lower()
         if 'gemini' in lower_name:
             return 'Gemini'
+        if 'deepseek' in lower_name:
+            return 'DeepSeek'
+        if 'grok' in lower_name:
+            return 'Grok'
         if 'glm' in lower_name and '4.5' in lower_name:
             return 'GLM4.5'
         if 'glm' in lower_name:
@@ -140,27 +154,38 @@ class IntelligenceReportGenerator:
             sid = f"T{i}"
 
             # 基础信息
-            user_id = post_data.get('user_id', 'unknown')
-            post_url = post_data.get('post_url', '未知')
-            
-            # 核心内容
-            original_content = post_data.get('post_content', '')
-            deep_interpretation = (post_data.get('deep_interpretation') or '').strip()
-            if not deep_interpretation:
-                deep_interpretation = "无深度洞察"
+            raw_user_handle = post_data.get('user_id') or 'unknown'
+            user_handle = str(raw_user_handle).lstrip('@') or 'unknown'
+            post_url = post_data.get('post_url') or '未知'
 
-            # 构建单个帖子的上下文块
-            block = f"""
-[Source: {sid} | User: @{user_id}]
-- 帖子内容:
-'''
-{original_content}
-'''
-- 深度洞察:
-'''
-{deep_interpretation}
-'''
-"""
+            # 核心内容
+            original_content = post_data.get('post_content') or ''
+            has_media = self._post_has_media(post_data)
+            include_deep = not (self.context_mode == 'light' and not has_media)
+
+            deep_interpretation = ''
+            if include_deep:
+                deep_interpretation = (post_data.get('deep_interpretation') or '').strip()
+                if not deep_interpretation:
+                    deep_interpretation = "无深度洞察"
+
+            block_lines = [
+                f"[Source: {sid} | User: @{user_handle}]",
+                "- 帖子内容:",
+                "'''",
+                original_content,
+                "'''"
+            ]
+
+            if include_deep:
+                block_lines.extend([
+                    "- 深度洞察:",
+                    "'''",
+                    deep_interpretation,
+                    "'''"
+                ])
+
+            block = "\n".join(block_lines)
 
             # 检查长度限制
             if total_chars + len(block) > self.max_content_length:
@@ -177,7 +202,7 @@ class IntelligenceReportGenerator:
                 'sid': sid,
                 'title': self._truncate(llm_summary or original_content, 100),
                 'link': post_url,
-                'nickname': user_id,
+                'nickname': user_handle,
                 'excerpt': self._truncate(original_content, 120)
             })
 
@@ -197,14 +222,64 @@ class IntelligenceReportGenerator:
                 return t[:pos + 1] + "\n..."
         return t + "\n..."
 
-    def get_intelligence_report_prompt(self, formatted_context: str, time_range: str) -> str:
+    def _post_has_media(self, post_data: Dict[str, Any]) -> bool:
+        """判断帖子是否包含媒体内容"""
+        has_media_flag = post_data.get('has_media')
+        if has_media_flag is not None:
+            try:
+                return bool(int(has_media_flag))
+            except (ValueError, TypeError):
+                return bool(has_media_flag)
+
+        media_urls = post_data.get('media_urls')
+        if not media_urls:
+            return False
+
+        if isinstance(media_urls, str):
+            try:
+                parsed = json.loads(media_urls)
+            except (json.JSONDecodeError, TypeError):
+                return False
+        elif isinstance(media_urls, list):
+            parsed = media_urls
+        else:
+            return False
+
+        if isinstance(parsed, list):
+            return len(parsed) > 0
+
+        return False
+
+    def get_intelligence_report_prompt(
+        self,
+        formatted_context: str,
+        time_range: str,
+        context_mode: Optional[str] = None
+    ) -> str:
         """
         构建情报分析报告的提示词。
         提示词内容直接内联在此函数中，以减少外部文件依赖。
         """
+        normalized_mode = (context_mode or getattr(self, 'context_mode', 'light') or 'light').lower()
+        if normalized_mode not in {'light', 'full'}:
+            normalized_mode = 'light'
+
         # 定义精确的数据格式描述，以匹配 format_enriched_posts_for_smart_llm 的输出
         # 这部分内容旨在告知LLM其接收到的`formatted_context`中每个帖子的详细结构
-        accurate_data_format_description = """# Input Data Format:
+        if normalized_mode == 'light':
+            accurate_data_format_description = """# Input Data Format:
+你将收到一系列经过预处理的帖子。每条都会呈现原始文本内容；只有当帖子包含图片或多媒体时，才会额外附带一段深度洞察。结构如下：
+`[Source: T_id | User: user_handle]`
+- 帖子内容:
+'''
+{帖子的完整原始内容}
+'''
+- 深度洞察: （仅当存在时才会出现）
+'''
+{图文帖对应的综合解读；若无此段落，请直接基于帖子原文进行分析}
+'''"""
+        else:
+            accurate_data_format_description = """# Input Data Format:
 你将收到一系列经过预处理的帖子，每条包含原始内容和AI生成的深度洞察。结构如下。请综合利用这两部分信息进行分析。
 `[Source: T_id | User: user_handle]`
 - 帖子内容:
@@ -322,7 +397,9 @@ class IntelligenceReportGenerator:
     * ... (更多建议)
 
 # Input Data:
+```
 {formatted_context}
+```
 """
 
         return prompt_template
@@ -621,21 +698,28 @@ class IntelligenceReportGenerator:
 
             # 获取富化后的帖子数据
             enriched_posts = self.db_manager.get_enriched_posts_for_report(
-                start_time, end_time, limit
+                start_time,
+                end_time,
+                limit,
+                context_mode=self.context_mode
             )
 
             if not enriched_posts:
                 logger.warning(f"在指定时间范围内没有找到富化的帖子数据")
                 return self._create_error_response('没有可用的帖子数据')
 
-            logger.info(f"获取到 {len(enriched_posts)} 条富化帖子数据")
+            logger.info(f"获取到 {len(enriched_posts)} 条富化帖子数据，context_mode={self.context_mode}")
 
             # 格式化上下文
             formatted_context, sources = self.format_enriched_posts_for_smart_llm(enriched_posts)
 
             # 构建提示词
             time_range_str = f"过去{hours}小时"
-            prompt = self.get_intelligence_report_prompt(formatted_context, time_range_str)
+            prompt = self.get_intelligence_report_prompt(
+                formatted_context,
+                time_range_str,
+                context_mode=self.context_mode
+            )
 
             logger.info(f"提示词长度: {len(prompt)} 字符")
 
