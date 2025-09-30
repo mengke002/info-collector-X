@@ -32,6 +32,39 @@ class PostInsightsAnalyzer:
 
         logger.info("帖子洞察分析器初始化完成")
 
+    def _calculate_content_complexity(self, post_text: str, image_count: int) -> str:
+        """
+        根据内容复杂度计算合适的洞察长度指引
+
+        Args:
+            post_text: 帖子文本内容
+            image_count: 图片数量
+
+        Returns:
+            洞察长度指引字符串
+        """
+        text_length = len(post_text)
+
+        # 纯文本帖子的长度判断
+        if image_count == 0:
+            if text_length < 100:
+                return "100字左右"  # 短文本，简短洞察
+            elif text_length < 300:
+                return "150字左右"  # 中等文本
+            else:
+                return "250字左右"  # 长文本，更详细的洞察
+
+        # 图文帖子的长度判断（需要更详细）
+        else:
+            if image_count == 1 and text_length < 150:
+                return "150字左右"  # 单图简短文本
+            elif image_count == 1 and text_length < 400:
+                return "200字左右"  # 单图中等文本
+            elif image_count >= 2 or text_length >= 400:
+                return "300字左右"  # 多图或长文本，需要详细解析
+            else:
+                return "250字左右"  # 默认情况
+
     def _robust_json_parser(self, raw_content: str) -> Optional[Dict[str, Any]]:
         """健壮的JSON解析器，用于处理LLM可能返回的不规范格式"""
         try:
@@ -55,8 +88,14 @@ class PostInsightsAnalyzer:
                 logger.error(f"最终解析JSON失败: {e}")
                 return None
 
-    def get_unified_text_prompt(self, post_text: str) -> str:
-        """获取纯文本帖子的统一增强解读Prompt"""
+    def get_unified_text_prompt(self, post_text: str, interpretation_length: str = "150字左右") -> str:
+        """
+        获取纯文本帖子的统一增强解读Prompt
+
+        Args:
+            post_text: 帖子文本内容
+            interpretation_length: 深度洞察的目标长度指引
+        """
         return f"""# Role: 推特帖子信息提取与深度分析助理
 
 # Context:
@@ -80,12 +119,27 @@ class PostInsightsAnalyzer:
     }}
   ],
   "content_type": "从更深层次判断这篇帖子的内容形式。候选形式：'教程/指南', '观点/评论', '读书/学习笔记', '项目更新', '提问/求助', '新闻/快讯'。",
-  "deep_interpretation": "（**此项为重点**）深入理解原帖，生成一个“文本深度洞察摘要”，该摘要将作为后续宏观分析的输入。摘要需以一段自然的文字，讲解帖子内容与你的理解，300字左右"
+  "deep_interpretation": "（**此项为重点**）深入理解原帖，生成一个"文本深度洞察摘要"，该摘要将作为后续宏观分析的输入。摘要需以一段自然的文字，讲解帖子内容与你的理解，{interpretation_length}"
 }}
 """
 
-    def get_unified_vlm_prompt(self, post_text: str) -> str:
-        """获取图文帖子的统一增强解读Prompt"""
+    def get_unified_vlm_prompt(self, post_text: str, image_count: int = 1, interpretation_length: str = "300字左右") -> str:
+        """
+        获取图文帖子的统一增强解读Prompt
+
+        Args:
+            post_text: 帖子文本内容
+            image_count: 图片数量
+            interpretation_length: 深度洞察的目标长度指引
+        """
+        # 根据图片数量调整图片描述的长度要求
+        if image_count == 1:
+            image_desc_length = "150字左右"
+        elif image_count == 2:
+            image_desc_length = "250字左右"
+        else:
+            image_desc_length = "300字左右"
+
         return f"""# Role: 推特帖子信息提取与深度分析助理
 
 # Context:
@@ -93,7 +147,7 @@ class PostInsightsAnalyzer:
 
 # Input:
 - Post 文本: ```{post_text}```
-- 图片: 参考附件
+- 图片: 参考附件（共{image_count}张）
 
 # Your Task:
 请严格按照以下JSON格式返回你的分析结果。不要添加任何解释性文字。
@@ -101,7 +155,7 @@ class PostInsightsAnalyzer:
 {{
   "llm_summary": "用50字左右精准概括这篇帖子的核心内容。",
   "post_tag": "为帖子内容打上一个最合适的标签。候选标签：'技术讨论', '产品发布', '行业观察', '投资分析', '创业心路', '工具推荐', '资源分享', '生活感悟', '时事评论'。",
-  "image_description": "详细描述图片内容，以及图片与文本是如何关联的。250字左右",
+  "image_description": "详细描述{'所有' if image_count > 1 else ''}图片内容，以及图片与文本是如何关联的。{image_desc_length}",
   "mentioned_entities": [
     {{
       "entity_name": "提取帖子中提及的专有名词，如项目名、人名、公司名",
@@ -109,7 +163,7 @@ class PostInsightsAnalyzer:
     }}
   ],
   "content_type": "从更深层次判断这篇帖子的内容形式。候选形式：'教程/指南', '观点/评论', '读书/学习笔记', '项目更新', '提问/求助', '新闻/快讯'。",
-  "deep_interpretation": "（**此项为重点**）结合文本和图片信息，生成1个**图文综合摘要**，作为对这条帖子的完整解读，也作为后续宏观分析任务的输入支撑。350字左右"
+  "deep_interpretation": "（**此项为重点**）结合文本和{'所有' if image_count > 1 else ''}图片信息，生成1个**图文综合摘要**，作为对这条帖子的完整解读，也作为后续宏观分析任务的输入支撑。{interpretation_length}"
 }}
 """
 
@@ -134,16 +188,23 @@ class PostInsightsAnalyzer:
         post_content = post.get('post_content', '')
         image_urls = self._extract_image_urls(post)
 
+        # 计算合适的洞察长度
+        interpretation_length = self._calculate_content_complexity(post_content, len(image_urls))
+
         try:
             if image_urls:
                 # --- VLM (图文) 处理 ---
-                prompt = self.get_unified_vlm_prompt(post_content)
+                prompt = self.get_unified_vlm_prompt(
+                    post_content,
+                    image_count=len(image_urls),
+                    interpretation_length=interpretation_length
+                )
                 image_data_list = [{'type': 'url', 'data': url, 'url': url, 'success': True} for url in image_urls]
                 response = self.llm_client.call_vlm(prompt, image_data_list)
                 model_name = self.llm_client.vlm_model
             else:
                 # --- LLM (纯文本) 处理 ---
-                prompt = self.get_unified_text_prompt(post_content)
+                prompt = self.get_unified_text_prompt(post_content, interpretation_length=interpretation_length)
                 response = self.llm_client.call_fast_model(prompt)
                 model_name = self.llm_client.fast_model
 
@@ -153,7 +214,7 @@ class PostInsightsAnalyzer:
             analysis_result = self._robust_json_parser(response['content'])
             if not analysis_result:
                 raise ValueError("无法从LLM响应中提取有效的JSON")
-            
+
             analysis_result['model_name'] = model_name
             return post_id, analysis_result
 

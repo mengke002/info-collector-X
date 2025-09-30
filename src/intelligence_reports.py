@@ -172,23 +172,11 @@ class IntelligenceReportGenerator:
                 if not deep_interpretation:
                     deep_interpretation = "无深度洞察"
 
-            block_lines = [
-                f"[Source: {sid} | User: @{user_handle}]",
-                "- 帖子内容:",
-                "'''",
-                original_content,
-                "'''"
-            ]
-
+            # 拼接原帖和解析
             if include_deep:
-                block_lines.extend([
-                    "- 深度洞察:",
-                    "'''",
-                    deep_interpretation,
-                    "'''"
-                ])
-
-            block = "\n".join(block_lines)
+                block = f"[{sid} @{user_handle}]\n{original_content}\n→ 洞察: {deep_interpretation}"
+            else:
+                block = f"[{sid} @{user_handle}]\n{original_content}"
 
             # 检查长度限制
             if total_chars + len(block) > self.max_content_length:
@@ -209,7 +197,7 @@ class IntelligenceReportGenerator:
                 'excerpt': self._truncate(original_content, 120)
             })
 
-        return "\n---\n".join(context_parts), sources
+        return "\n\n---\n\n".join(context_parts), sources
 
     def _truncate(self, text: str, max_len: int) -> str:
         """截断文本，保持可读性"""
@@ -271,28 +259,27 @@ class IntelligenceReportGenerator:
         # 这部分内容旨在告知LLM其接收到的`formatted_context`中每个帖子的详细结构
         if normalized_mode == 'light':
             accurate_data_format_description = """# Input Data Format:
-你将收到一系列经过预处理的帖子。每条都会呈现原始文本内容；只有当帖子包含图片或多媒体时，才会额外附带一段深度洞察。结构如下：
-`[Source: T_id | User: user_handle]`
-- 帖子内容:
-'''
-{帖子的完整原始内容}
-'''
-- 深度洞察: （仅当存在时才会出现）
-'''
-{图文帖对应的综合解读；若无此段落，请直接基于帖子原文进行分析}
-'''"""
+你将收到一系列经过预处理的帖子，采用紧凑格式以优化上下文。每条帖子包含原始文本内容；只有当帖子包含图片或多媒体时，才会额外附带深度洞察。
+
+**格式说明**：
+- 纯文本帖：`[T_id @user_handle]` + 换行 + 帖子原文
+- 图文帖：`[T_id @user_handle]` + 换行 + 帖子原文 + 换行 + `→ 洞察: {AI生成的综合解读}`
+
+**重要**：
+1. T_id 是来源标识符，你在分析中引用时使用 `[Source: T_id]` 格式
+2. 对于纯文本帖，请直接基于原文进行分析
+3. 对于图文帖，请综合原文和洞察内容进行分析"""
         else:
             accurate_data_format_description = """# Input Data Format:
-你将收到一系列经过预处理的帖子，每条包含原始内容和AI生成的深度洞察。结构如下。请综合利用这两部分信息进行分析。
-`[Source: T_id | User: user_handle]`
-- 帖子内容:
-'''
-{帖子的完整原始内容}
-'''
-- 深度洞察:
-'''
-{LLM生成的深度解读，这是你分析的核心依据}
-'''"""
+你将收到一系列经过预处理的帖子，采用紧凑格式以优化上下文。每条帖子都包含原始内容和AI生成的深度洞察。
+
+**格式说明**：
+`[T_id @user_handle]` + 换行 + 帖子原文 + 换行 + `→ 洞察: {LLM生成的深度解读}`
+
+**重要**：
+1. T_id 是来源标识符，你在分析中引用时使用 `[Source: T_id]` 格式
+2. 请综合利用原文和洞察两部分信息进行分析
+3. 洞察部分是AI对帖子的深度解读，是你分析的核心依据"""
 
         # 核心提示词模板
         prompt_template = f"""# Role: 世界顶级的技术与风险投资分析师，拥有《经济学人》的编辑严谨度和《Stratechery》的前瞻性洞察力。
