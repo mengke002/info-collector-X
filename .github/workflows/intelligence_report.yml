@@ -33,6 +33,7 @@ on:
         default: '300'
         type: choice
         options:
+          - '100'
           - '200'
           - '300'
           - '500'
