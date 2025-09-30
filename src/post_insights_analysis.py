@@ -60,7 +60,7 @@ class PostInsightsAnalyzer:
                 return "150字左右"  # 单图简短文本
             elif image_count == 1 and text_length < 400:
                 return "200字左右"  # 单图中等文本
-            elif image_count >= 2 or text_length >= 400:
+            elif image_count > 2 or text_length >= 400:
                 return "300字左右"  # 多图或长文本，需要详细解析
             else:
                 return "250字左右"  # 默认情况
