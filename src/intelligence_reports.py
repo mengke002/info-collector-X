@@ -115,6 +115,46 @@ class IntelligenceReportGenerator:
 
         return models
 
+    def _clean_image_urls_from_content(self, content: str, media_count: int = 0) -> str:
+        """
+        清理帖子内容中的图片 URL，替换为简短说明
+
+        Args:
+            content: 原始帖子内容
+            media_count: 图片数量（从 media_urls 字段获取）
+
+        Returns:
+            清理后的内容
+        """
+        if not content:
+            return ""
+
+        # 匹配 markdown 图片语法：![...](...) 或 ![](...)
+        # 以及单独的 https://pbs.twimg.com/... URL
+        import re
+
+        # 统计并移除 markdown 图片
+        markdown_img_pattern = r'!\[.*?\]\(https://pbs\.twimg\.com/[^\)]+\)'
+        found_markdown = re.findall(markdown_img_pattern, content)
+
+        # 移除所有 markdown 图片
+        cleaned = re.sub(markdown_img_pattern, '', content)
+
+        # 移除独立的图片 URL 行
+        img_url_pattern = r'https://pbs\.twimg\.com/media/[^\s\n]+'
+        cleaned = re.sub(img_url_pattern, '', cleaned)
+
+        # 清理多余的空行（保留最多一个空行）
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        cleaned = cleaned.strip()
+
+        # 在内容开头添加简短的图片说明
+        if media_count > 0:
+            img_note = f"[附{media_count}张图]"
+            cleaned = f"{img_note}\n{cleaned}"
+
+        return cleaned
+
     def _get_model_display_name(self, model_name: str) -> str:
         """根据模型名称生成用于展示的友好名称"""
         if not model_name:
@@ -164,6 +204,25 @@ class IntelligenceReportGenerator:
             # 核心内容
             original_content = post_data.get('post_content') or ''
             has_media = self._post_has_media(post_data)
+
+            # 计算图片数量
+            media_count = 0
+            if has_media:
+                media_urls = post_data.get('media_urls')
+                if media_urls:
+                    try:
+                        if isinstance(media_urls, str):
+                            parsed = json.loads(media_urls)
+                        else:
+                            parsed = media_urls
+                        if isinstance(parsed, list):
+                            media_count = len(parsed)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+            # 清理图片 URL，压缩上下文
+            original_content = self._clean_image_urls_from_content(original_content, media_count)
+
             include_deep = not (self.context_mode == 'light' and not has_media)
 
             deep_interpretation = ''
