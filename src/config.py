@@ -78,6 +78,18 @@ class Config:
                 models.append(candidate)
         return models
 
+    def _parse_tag_list(self, raw_value: str) -> List[str]:
+        """将逗号分隔的标签字符串解析为列表"""
+        if not raw_value:
+            return []
+
+        tags: List[str] = []
+        for item in raw_value.split(','):
+            candidate = item.strip()
+            if candidate and candidate not in tags:
+                tags.append(candidate)
+        return tags
+
     def get_database_config(self) -> Dict[str, Any]:
         """获取数据库配置（环境变量 > config.ini > 默认值）。
         环境变量命名采用 DB_*；为兼容，密码也支持 MYSQL_PASSWORD。
@@ -168,11 +180,16 @@ class Config:
 
     def get_analysis_config(self) -> Dict[str, Any]:
         """获取分析任务配置"""
+        # 获取 exclude_tags 配置并解析为列表
+        exclude_tags_raw = self._get_config_value('analysis', 'exclude_tags', 'EXCLUDE_TAGS', '', str)
+        exclude_tags = self._parse_tag_list(exclude_tags_raw)
+
         return {
             'interpretation_mode': self._get_config_value('analysis', 'interpretation_mode', 'INTERPRETATION_MODE', 'light', str),
             'hours_back_daily': self._get_config_value('analysis', 'hours_back_daily', 'ANALYSIS_HOURS_BACK_DAILY', 24, int),
             'days_back_weekly': self._get_config_value('analysis', 'days_back_weekly', 'ANALYSIS_DAYS_BACK_WEEKLY', 7, int),
             'days_back_kol': self._get_config_value('analysis', 'days_back_kol', 'ANALYSIS_DAYS_BACK_KOL', 30, int),
+            'exclude_tags': exclude_tags,
         }
 
     def get_llm_config(self) -> Dict[str, Any]:

@@ -605,7 +605,8 @@ class DatabaseManager:
         start_time: datetime,
         end_time: datetime,
         limit: Optional[int] = None,
-        context_mode: str = 'light'
+        context_mode: str = 'light',
+        exclude_tags: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """获取指定时间范围内的富化帖子用于报告生成
 
@@ -613,6 +614,8 @@ class DatabaseManager:
             start_time: 开始时间
             end_time: 结束时间
             limit: 限制数量
+            context_mode: 上下文模式
+            exclude_tags: 要排除的标签列表
 
         Returns:
             富化帖子数据列表
@@ -638,6 +641,16 @@ class DatabaseManager:
                 else:
                     interpretation_select = "pi.interpretation AS deep_interpretation"
 
+                # 构建标签过滤条件
+                tag_filter_sql = ""
+                query_params = [start_time, end_time]
+
+                if exclude_tags and len(exclude_tags) > 0:
+                    # 使用 NOT IN 过滤标签
+                    placeholders = ', '.join(['%s'] * len(exclude_tags))
+                    tag_filter_sql = f" AND (pi.tag IS NULL OR pi.tag NOT IN ({placeholders}))"
+                    query_params.extend(exclude_tags)
+
                 sql = f"""
                 SELECT p.id,
                        p.post_content,
@@ -657,18 +670,19 @@ class DatabaseManager:
                 JOIN twitter_users u ON p.user_table_id = u.id
                 WHERE pi.status = 'completed'
                   AND p.published_at >= %s
-                  AND p.published_at <= %s
+                  AND p.published_at <= %s{tag_filter_sql}
                 ORDER BY p.published_at DESC
                 """
 
                 if limit:
                     sql += f" LIMIT {limit}"
 
-                cursor.execute(sql, (start_time, end_time))
+                cursor.execute(sql, query_params)
                 posts = cursor.fetchall()
 
+                excluded_info = f" (排除标签: {', '.join(exclude_tags)})" if exclude_tags else ""
                 logger.info(
-                    f"获取到时间范围内的 {len(posts)} 条富化帖子用于报告生成 (mode={normalized_mode})"
+                    f"获取到时间范围内的 {len(posts)} 条富化帖子用于报告生成 (mode={normalized_mode}){excluded_info}"
                 )
                 return posts
 

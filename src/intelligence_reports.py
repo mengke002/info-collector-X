@@ -48,7 +48,10 @@ class IntelligenceReportGenerator:
             context_mode = 'light'
         self.context_mode = context_mode
 
-        logger.info(f"情报报告生成器初始化完成，context_mode={self.context_mode}")
+        # 获取排除标签配置
+        self.exclude_tags = analysis_config.get('exclude_tags', []) if analysis_config else []
+
+        logger.info(f"情报报告生成器初始化完成，context_mode={self.context_mode}, exclude_tags={self.exclude_tags}")
 
     def _log_task_start(self, task_type: str, **kwargs) -> None:
         """统一的任务开始日志记录"""
@@ -292,10 +295,10 @@ class IntelligenceReportGenerator:
 '''"""
 
         # 核心提示词模板
-        prompt_template = f"""# Role: 世界级技术与投资情报分析师兼《经济学人》资深编辑
+        prompt_template = f"""# Role: 世界顶级的技术与风险投资分析师，拥有《经济学人》的编辑严谨度和《Stratechery》的前瞻性洞察力。
 
 # Context:
-你正在为一份顶级内参撰写报告，读者是全球头部的技术专家、创业者和风险投资人。他们时间宝贵，极度关注"信号"，厌恶"噪音"。你收到的原始材料是{time_range}内，由我们精心筛选的约300位全球技术思想领袖在X/Twitter上发布的帖子。这些材料已经过统一的洞察引擎处理，包含结构化要点与深度解读。
+你正在为一份全球顶级技术专家、创始人与VC合伙人阅读的内参撰写报告。他们时间宝贵，极度关注"信号"，厌恶"噪音"。你收到的原始材料是{time_range}内，由我们精心筛选的全球技术思想领袖在X/Twitter上发布的帖子，并经过了初步的AI洞察处理。
 
 # Core Principles:
 1.  **深度与价值优先 (Depth & Value First)**: 你的核心目标是挖掘出对从业者有直接价值的信息。在撰写每个部分时，都应追求内容的**深度和完整性**，**避免过于简短的概括**。
@@ -322,7 +325,7 @@ class IntelligenceReportGenerator:
     5.  **备选方案**: 如果本周期内没有明显对立的观点，请选择一个核心话题，**深入剖析**其不同角度（如开发者、产品经理、用户）的论述，或将其改为对一个关键人物核心观点的深度剖析。
 
 **第三层次：趋势与叙事深度分析 (Trend & Narrative Analysis)**
-*   **3.1 新兴趋势/信号**: 识别所有讨论度快速上升的"新兴趋势"或"微弱信号"。**详细描述**它是什么，为什么它现在出现，以及它可能对行业产生什么影响。**不要局限于少数几点**。
+*   **3.1 趋势/信号**: 识别所有热度高或者讨论度快速上升的"趋势"或"微弱信号"。**详细描述**它是什么，为什么它现在出现，以及它可能对行业产生什么影响。**不要局限于少数几点**。
 *   **3.2 宏大叙事**: 寻找不同话题之间的内在联系，构建一个或多个宏大叙事。**详细展开**这个叙事，例如，将"新AI模型的发布"、"开源社区的讨论"和"下游应用的探索"联系起来，形成一个关于"XXX技术从理论到实践的演进路径"的完整叙事。
 
 **第四层次：精选资源库 (Curated Resource Library)**
@@ -366,35 +369,35 @@ class IntelligenceReportGenerator:
 ---
 
 ## 三、趋势与叙事分析
-### 3.1 新兴趋势：[趋势名称]
+### 3.1 发展趋势：[趋势名称]
 [详细描述该趋势...] [Sources: T_d, T_e]
-...(更多趋势)
+...(详尽的更多趋势)
 ### 3.2 宏大叙事：[叙事名称]
 [详细描述该叙事...] [Sources: T_f, T_g]
-...(更多叙事)
+...(详尽的更多叙事)
 
 ---
 
 ## 四、精选资源库
 ### 4.1 教程与指南
 *   **[资源名称]**: [详细推荐理由] [Source: T_h]
-*   ... (更多资源)
+*   ... (详尽的更多资源)
 ### 4.2 工具与项目
 *   **[资源名称]**: [详细推荐理由] [Source: T_i]
-*   ... (更多资源)
+*   ... (详尽的更多资源)
 
 ---
 
 ## 五、角色化行动建议
 *   **To 开发者**:
     * [建议内容] [Source: T_j]
-    * ... (更多建议)
+    * ... (详尽的更多建议)
 *   **To 产品经理/创业者**:
     * [建议内容] [Source: T_k]
-    * ... (更多建议)
+    * ... (详尽的更多建议)
 *   **To 投资者/研究者**:
     * [建议内容] [Source: T_l]
-    * ... (更多建议)
+    * ... (详尽的更多建议)
 
 # Input Data:
 ```
@@ -701,7 +704,8 @@ class IntelligenceReportGenerator:
                 start_time,
                 end_time,
                 limit,
-                context_mode=self.context_mode
+                context_mode=self.context_mode,
+                exclude_tags=self.exclude_tags
             )
 
             if not enriched_posts:

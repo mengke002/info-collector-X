@@ -81,6 +81,8 @@ jobs:
       NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
       # 其他配置
       INTERPRETATION_MODE: ${{ vars.INTERPRETATION_MODE || 'light' }}
+      # 排除标签配置（逗号分隔，例如：生活感悟,时事评论）
+      EXCLUDE_TAGS: ${{ secrets.EXCLUDE_TAGS }}
 
     steps:
     - name: 检出代码
@@ -129,6 +131,8 @@ jobs:
       # Notion 集成配置
       NOTION_INTEGRATION_TOKEN: ${{ secrets.NOTION_INTEGRATION_TOKEN }}
       NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+      # 排除标签配置（逗号分隔，例如：生活感悟,时事评论）
+      EXCLUDE_TAGS: ${{ secrets.EXCLUDE_TAGS }}
 
     steps:
     - name: 检出代码
