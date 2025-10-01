@@ -1099,10 +1099,16 @@ class XIntelligenceNotionClient:
 
             # 检查rich_text数组长度是否超过100
             if len(processed_rich_text) <= 100:
-                # 没有超长，直接返回修复后的块
+                # 没有超长，但需要检查并修复子项
                 fixed_block = block.copy()
                 fixed_block[block_type] = fixed_block[block_type].copy()
                 fixed_block[block_type]["rich_text"] = processed_rich_text
+
+                # 递归处理子项（如果是列表项）
+                if block_type == "bulleted_list_item" and "children" in block[block_type]:
+                    fixed_children = self._fix_nested_children(block[block_type]["children"])
+                    fixed_block[block_type]["children"] = fixed_children
+
                 return [fixed_block]
 
             # rich_text数组超长，需要分割成多个块
@@ -1123,10 +1129,11 @@ class XIntelligenceNotionClient:
                     }
                 }
 
-                # 如果是列表项且有子项，只在第一个块中保留子项
+                # 如果是列表项且有子项，只在第一个块中保留子项（并修复子项）
                 if block_type == "bulleted_list_item" and i == 0:
                     if "children" in block[block_type]:
-                        new_block[block_type]["children"] = block[block_type]["children"]
+                        fixed_children = self._fix_nested_children(block[block_type]["children"])
+                        new_block[block_type]["children"] = fixed_children
 
                 result_blocks.append(new_block)
 
@@ -1135,6 +1142,52 @@ class XIntelligenceNotionClient:
         except Exception as e:
             self.logger.warning(f"分割块{block_index}时出错: {e}")
             return [block]
+
+    def _fix_nested_children(self, children: List[Dict]) -> List[Dict]:
+        """递归修复嵌套列表项中的超长 rich_text 数组"""
+        fixed_children = []
+
+        for child in children:
+            if child.get("type") != "bulleted_list_item":
+                fixed_children.append(child)
+                continue
+
+            child_rich_text = child.get("bulleted_list_item", {}).get("rich_text", [])
+
+            # 如果子项的 rich_text 超过100个元素，需要分割
+            if len(child_rich_text) > 100:
+                self.logger.info(f"嵌套列表项的rich_text数组过长({len(child_rich_text)}个元素)，分割处理")
+
+                # 分割 rich_text 数组
+                chunk_size = 99
+                for i in range(0, len(child_rich_text), chunk_size):
+                    chunk_rich_text = child_rich_text[i:i + chunk_size]
+
+                    new_child = {
+                        "object": "block",
+                        "type": "bulleted_list_item",
+                        "bulleted_list_item": {
+                            "rich_text": chunk_rich_text
+                        }
+                    }
+
+                    # 只在第一个分割块中保留递归的子项
+                    if i == 0 and "children" in child.get("bulleted_list_item", {}):
+                        grandchildren = child["bulleted_list_item"]["children"]
+                        new_child["bulleted_list_item"]["children"] = self._fix_nested_children(grandchildren)
+
+                    fixed_children.append(new_child)
+            else:
+                # rich_text 数组长度正常，但仍需递归处理更深层的子项
+                fixed_child = child.copy()
+                if "children" in child.get("bulleted_list_item", {}):
+                    grandchildren = child["bulleted_list_item"]["children"]
+                    fixed_child["bulleted_list_item"] = fixed_child["bulleted_list_item"].copy()
+                    fixed_child["bulleted_list_item"]["children"] = self._fix_nested_children(grandchildren)
+
+                fixed_children.append(fixed_child)
+
+        return fixed_children
 
     def _split_content_smartly(self, content: str, max_length: int) -> List[str]:
         """智能分割内容，尽量在句号、换行等位置分割"""
