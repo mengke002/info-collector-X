@@ -22,7 +22,8 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
-    logging.getLogger(__name__).warning("PIL/Pillow未安装，无法进行图片处理。请安装: pip install pillow")
+    logger = logging.getLogger(__name__)
+    logger.warning("PIL/Pillow未安装，无法进行图片处理。请安装: pip install pillow")
 
 logger = logging.getLogger(__name__)
 
@@ -98,14 +99,21 @@ def download_and_resize_image(url: str, max_dimension: int = 1024, timeout: int 
                 if url_lower.endswith('.jpg') or url_lower.endswith('.jpeg'):
                     output_format = 'JPEG'
                     suffix = '.jpg'
+                elif url_lower.endswith('.png'):
+                    output_format = 'PNG'
+                    suffix = '.png'
                 else:
+                    # 其他格式（webp, heic等）统一转为PNG
                     output_format = 'PNG'
                     suffix = '.png'
 
                 # 保存为目标格式的临时文件
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as converted_file:
                     converted_path = converted_file.name
-                    img.save(converted_path, format=output_format, quality=85, optimize=True)
+                    if output_format == 'JPEG':
+                        img.save(converted_path, format=output_format, quality=85, optimize=True)
+                    else:
+                        img.save(converted_path, format=output_format, optimize=True)
 
             # 读取处理后的图片并编码为base64
             with open(converted_path, 'rb') as f:
@@ -383,6 +391,7 @@ class PostInsightsAnalyzer:
                     'url': url,
                     'success': True
                 })
+            logger.debug(f"准备了 {len(image_data_list)} 张图片 (URL模式)")
         else:
             # base64模式：从缓存获取
             for url in image_urls:
@@ -396,6 +405,8 @@ class PostInsightsAnalyzer:
                     })
                 else:
                     logger.warning(f"图片缓存中未找到或处理失败: {url}")
+
+            logger.debug(f"准备了 {len(image_data_list)}/{len(image_urls)} 张图片 (base64模式)")
 
         return image_data_list
 

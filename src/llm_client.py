@@ -178,12 +178,30 @@ class LLMClient:
 
                 for chunk in response:
                     chunk_count += 1
-                    delta = chunk.choices[0].delta
-                    content_chunk = getattr(delta, 'content', None)
+                    try:
+                        # 安全检查chunk结构
+                        if not hasattr(chunk, 'choices') or not chunk.choices:
+                            self.logger.debug(f"跳过空VLM chunk {chunk_count}")
+                            continue
 
-                    if content_chunk:
-                        full_content += content_chunk
-                        self.logger.debug(f"VLM Chunk {chunk_count}: {content_chunk[:50]}...")
+                        # 安全检查choices列表长度
+                        if len(chunk.choices) == 0:
+                            self.logger.debug(f"跳过空choices的VLM chunk {chunk_count}")
+                            continue
+
+                        delta = chunk.choices[0].delta
+                        content_chunk = getattr(delta, 'content', None)
+
+                        if content_chunk:
+                            full_content += content_chunk
+                            self.logger.debug(f"VLM Chunk {chunk_count}: {content_chunk[:50]}...")
+                    except IndexError as e:
+                        self.logger.warning(f"VLM Chunk {chunk_count} 处理异常 (IndexError)，已跳过: {e}")
+                        continue
+                    except Exception as chunk_error:
+                        self.logger.warning(f"VLM Chunk {chunk_count} 处理异常，已跳过: {chunk_error}")
+                        self.logger.debug("异常VLM chunk详情: %r", chunk, exc_info=True)
+                        continue
 
                 self.logger.info(f"VLM调用完成 - 处理了 {chunk_count} 个chunks")
                 self.logger.info(f"响应内容长度: {len(full_content)} 字符")
@@ -268,21 +286,39 @@ class LLMClient:
 
                 for chunk in response:
                     chunk_count += 1
-                    delta = chunk.choices[0].delta
+                    try:
+                        # 安全检查chunk结构
+                        if not hasattr(chunk, 'choices') or not chunk.choices:
+                            self.logger.debug(f"跳过空chunk {chunk_count}")
+                            continue
 
-                    # 安全地获取reasoning_content和content
-                    reasoning_content = getattr(delta, 'reasoning_content', None)
-                    content_chunk = getattr(delta, 'content', None)
+                        # 安全检查choices列表长度
+                        if len(chunk.choices) == 0:
+                            self.logger.debug(f"跳过空choices的chunk {chunk_count}")
+                            continue
 
-                    if reasoning_content:
-                        # 推理内容单独收集，但不加入最终结果
-                        reasoning_content_full += reasoning_content
-                        self.logger.debug(f"Chunk {chunk_count} - Reasoning: {reasoning_content[:50]}...")
+                        delta = chunk.choices[0].delta
 
-                    if content_chunk:
-                        # 只收集最终的content内容
-                        full_content += content_chunk
-                        self.logger.debug(f"Chunk {chunk_count} - Content: {content_chunk[:50]}...")
+                        # 安全地获取reasoning_content和content
+                        reasoning_content = getattr(delta, 'reasoning_content', None)
+                        content_chunk = getattr(delta, 'content', None)
+
+                        if reasoning_content:
+                            # 推理内容单独收集，但不加入最终结果
+                            reasoning_content_full += reasoning_content
+                            self.logger.debug(f"Chunk {chunk_count} - Reasoning: {reasoning_content[:50]}...")
+
+                        if content_chunk:
+                            # 只收集最终的content内容
+                            full_content += content_chunk
+                            self.logger.debug(f"Chunk {chunk_count} - Content: {content_chunk[:50]}...")
+                    except IndexError as e:
+                        self.logger.warning(f"Chunk {chunk_count} 处理异常 (IndexError)，已跳过: {e}")
+                        continue
+                    except Exception as chunk_error:
+                        self.logger.warning(f"Chunk {chunk_count} 处理异常，已跳过: {chunk_error}")
+                        self.logger.debug("异常chunk详情: %r", chunk, exc_info=True)
+                        continue
 
                 self.logger.info(f"LLM调用完成 - 处理了 {chunk_count} 个chunks")
                 self.logger.info(f"响应内容长度: {len(full_content)} 字符")
@@ -303,23 +339,8 @@ class LLMClient:
                 error_msg = f"LLM调用失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}"
                 self.logger.error(error_msg)
 
-                # 如果是某些不可重试的错误，直接返回
-                if "401" in str(e) or "403" in str(e) or "Invalid API key" in str(e):
-                    self.logger.error("检测到认证错误，不进行重试")
-                    return {
-                        'success': False,
-                        'error': f"认证错误: {str(e)}",
-                        'model': model_name,
-                        'final_attempt': True
-                    }
-
-                # 如果不是最后一次尝试，等待后重试
-                if attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 2  # 递增等待时间: 2, 4, 6秒
-                    self.logger.info(f"等待 {wait_time} 秒后重试...")
-                    time.sleep(wait_time)
-                else:
-                    # 最后一次尝试失败
+                # 如果是最后一次尝试，记录详细错误信息并返回失败
+                if attempt == max_retries - 1:
                     self.logger.error(error_msg, exc_info=True)
                     return {
                         'success': False,
@@ -327,6 +348,11 @@ class LLMClient:
                         'model': model_name,
                         'total_attempts': max_retries
                     }
+                else:
+                    # 等待后重试
+                    wait_time = (attempt + 1) * 2  # 递增等待时间: 2, 4, 6秒
+                    self.logger.info(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
 
     # 保留旧版本兼容性接口
     def call_llm(self, prompt: str, model_type: str = 'fast', temperature: float = 0.3, max_retries: int = 3) -> Dict[str, Any]:
