@@ -209,9 +209,15 @@ class Config:
         if not report_models and smart_model_name:
             report_models.append(smart_model_name)
 
+        # 解析布尔值配置
+        use_image_url_str = self._get_config_value('llm', 'use_image_url', 'VLM_USE_IMAGE_URL', 'false', str)
+        use_image_url = use_image_url_str.lower() in ('true', '1', 'yes')
+
         return {
             'fast_model_name': self._get_config_value('llm', 'fast_model_name', 'LLM_FAST_MODEL_NAME', 'gpt-3.5-turbo-16k'),
             'fast_vlm_model_name': self._get_config_value('llm', 'fast_vlm_model_name', 'LLM_FAST_VLM_NAME', 'gpt-4-vision-preview'),
+            'fast_vlm_fallback_model_name': self._get_config_value('llm', 'fast_vlm_fallback_model_name', 'LLM_FAST_VLM_FALLBACK_NAME', 'gpt-4-vision-preview'),
+            'use_image_url': use_image_url,
             'smart_model_name': smart_model_name,
             'report_models': report_models,
             'openai_api_key': openai_api_key,

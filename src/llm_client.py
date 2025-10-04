@@ -25,6 +25,7 @@ class LLMClient:
 
         self.fast_model = llm_config.get('fast_model_name', 'gpt-3.5-turbo-16k')
         self.vlm_model = llm_config.get('fast_vlm_model_name', 'gpt-4-vision-preview')
+        self.vlm_fallback_model = llm_config.get('fast_vlm_fallback_model_name', 'gpt-4-vision-preview')
         self.smart_model = llm_config.get('smart_model_name', 'gpt-4.1')
         self.report_models = llm_config.get('report_models', [])
 
@@ -36,6 +37,7 @@ class LLMClient:
         self.logger.info(f"LLM客户端初始化成功")
         self.logger.info(f"Fast Model: {self.fast_model}")
         self.logger.info(f"VLM Model: {self.vlm_model}")
+        self.logger.info(f"VLM Fallback Model: {self.vlm_fallback_model}")
         self.logger.info(f"Smart Model: {self.smart_model}")
         self.logger.info(f"Report Models: {self.report_models}")
 
@@ -80,12 +82,15 @@ class LLMClient:
                  model_name: Optional[str] = None, temperature: float = 0.3,
                  max_retries: int = 3) -> Dict[str, Any]:
         """
-        调用视觉多模态模型进行图文分析，支持混合模式
-        支持URL格式的输入（针对X/Twitter项目简化）
+        调用视觉多模态模型进行图文分析，支持URL和base64混合模式
 
         Args:
             prompt: 文本提示词
-            image_data_list: 图片数据列表，每个元素为{'type': 'url', 'data': url, 'url': original_url}
+            image_data_list: 图片数据列表，每个元素包含：
+                - type: 'url' 或 'base64'
+                - data: URL字符串 或 base64字符串
+                - url: 原始URL（可选）
+                - success: 是否成功（可选）
             model_name: 指定的模型名称，如果不提供则使用默认VLM模型
             temperature: 生成温度
             max_retries: 最大重试次数
@@ -126,15 +131,33 @@ class LLMClient:
                 # 构建消息内容
                 content = [{"type": "text", "text": prompt}]
 
-                # 添加图片（只支持URL模式，适配X/Twitter项目的需求）
+                # 添加图片（支持URL和base64混合模式）
                 for i, img_data in enumerate(valid_images):
-                    img_url = img_data.get('data')
-                    if img_url:
+                    img_type = img_data.get('type', 'url')
+                    img_data_value = img_data.get('data')
+
+                    if img_type == 'url':
+                        # URL模式
                         content.append({
                             "type": "image_url",
-                            "image_url": {"url": img_url}
+                            "image_url": {"url": img_data_value}
                         })
-                        self.logger.debug(f"添加图片 {i+1}: {img_url[:50]}...")
+                        self.logger.debug(f"添加图片 {i+1} (URL): {img_data_value[:50]}...")
+                    elif img_type == 'base64':
+                        # base64模式
+                        # 检测是否已经包含data URI前缀
+                        if img_data_value.startswith('data:'):
+                            base64_url = img_data_value
+                        else:
+                            # 默认使用PNG格式
+                            base64_url = f"data:image/png;base64,{img_data_value}"
+
+                        content.append({
+                            "type": "image_url",
+                            "image_url": {"url": base64_url}
+                        })
+                        original_url = img_data.get('url', 'unknown')
+                        self.logger.debug(f"添加图片 {i+1} (base64): {original_url[:50]}... (base64长度: {len(img_data_value)})")
 
                 # 创建请求
                 response = self.client.chat.completions.create(

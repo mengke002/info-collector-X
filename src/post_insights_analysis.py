@@ -6,6 +6,10 @@
 import logging
 import json
 import re
+import base64
+import os
+import tempfile
+import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -13,7 +17,130 @@ from .database import DatabaseManager
 from .llm_client import LLMClient
 from .config import config
 
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    logging.getLogger(__name__).warning("PIL/Pillow未安装，无法进行图片处理。请安装: pip install pillow")
+
 logger = logging.getLogger(__name__)
+
+
+def download_and_resize_image(url: str, max_dimension: int = 1024, timeout: int = 10) -> Optional[str]:
+    """
+    下载图片并调整尺寸，返回base64编码
+
+    Args:
+        url: 图片URL
+        max_dimension: 最大边长，默认1024像素
+        timeout: 下载超时时间
+
+    Returns:
+        base64编码的图片数据，失败时返回None
+    """
+    if not PIL_AVAILABLE:
+        logger.error("PIL/Pillow未安装，无法处理图片")
+        return None
+
+    try:
+        # 下载图片
+        response = requests.get(url, timeout=timeout, stream=True)
+        response.raise_for_status()
+
+        # 检查内容大小，避免下载过大的文件
+        content_length = response.headers.get('content-length')
+        if content_length and int(content_length) > 50 * 1024 * 1024:  # 50MB限制
+            logger.warning(f"图片文件过大 ({int(content_length)/(1024*1024):.1f}MB): {url}")
+            return None
+
+        # 创建临时文件
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_path = temp_file.name
+
+            # 分块下载
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    temp_file.write(chunk)
+
+        try:
+            # 使用PIL打开图片
+            with Image.open(temp_path) as img:
+                logger.debug(f"成功打开图片: {url}, 格式: {img.format}, 模式: {img.mode}, 尺寸: {img.size}")
+
+                # 转换RGBA模式以支持透明度
+                if img.mode in ('RGBA', 'LA'):
+                    # 创建白色背景
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'RGBA':
+                        background.paste(img, mask=img.split()[-1])  # 使用alpha通道作为mask
+                    else:
+                        background.paste(img, mask=img.split()[-1])
+                    img = background
+                elif img.mode not in ('RGB', 'L'):
+                    img = img.convert('RGB')
+
+                # 图片尺寸压缩：限制在指定尺寸以内
+                width, height = img.size
+                if width > max_dimension or height > max_dimension:
+                    # 计算缩放比例，保持长宽比
+                    scale_ratio = min(max_dimension / width, max_dimension / height)
+                    new_width = int(width * scale_ratio)
+                    new_height = int(height * scale_ratio)
+
+                    # 使用高质量的重采样算法
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    logger.debug(f"图片尺寸压缩: {width}x{height} -> {new_width}x{new_height} (压缩比: {scale_ratio:.2f})")
+
+                # 判断原始格式，决定输出格式
+                # 如果原格式是JPG/JPEG/PNG，保持原格式；否则使用PNG
+                url_lower = url.lower()
+                if url_lower.endswith('.jpg') or url_lower.endswith('.jpeg'):
+                    output_format = 'JPEG'
+                    suffix = '.jpg'
+                else:
+                    output_format = 'PNG'
+                    suffix = '.png'
+
+                # 保存为目标格式的临时文件
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as converted_file:
+                    converted_path = converted_file.name
+                    img.save(converted_path, format=output_format, quality=85, optimize=True)
+
+            # 读取处理后的图片并编码为base64
+            with open(converted_path, 'rb') as f:
+                image_data = f.read()
+                base64_image = base64.b64encode(image_data).decode('utf-8')
+
+            # 清理临时文件
+            os.unlink(temp_path)
+            os.unlink(converted_path)
+
+            logger.debug(f"图片处理成功: {url} -> {output_format} ({len(image_data)} bytes)")
+            return base64_image
+
+        except Exception as e:
+            logger.warning(f"图片处理失败: {url}, 错误: {e}")
+            return None
+
+    except requests.exceptions.Timeout:
+        logger.warning(f"图片下载超时: {url}")
+        return None
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"图片下载失败: {url}, 错误: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"图片处理异常: {url}, 错误: {e}")
+        return None
+    finally:
+        # 确保清理临时文件
+        try:
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                os.unlink(temp_path)
+            if 'converted_path' in locals() and os.path.exists(converted_path):
+                os.unlink(converted_path)
+        except:
+            pass
 
 
 class PostInsightsAnalyzer:
@@ -30,7 +157,19 @@ class PostInsightsAnalyzer:
         self.fast_llm_workers = postprocessing_config['fast_llm_workers']
         self.fast_vlm_workers = postprocessing_config['fast_vlm_workers']
 
+        # 获取VLM配置
+        llm_config = config.get_llm_config()
+        self.use_image_url = llm_config.get('use_image_url', False)
+
+        # 图片预处理缓存：URL -> base64
+        self.image_cache: Dict[str, Optional[str]] = {}
+
+        # 图片处理线程池（用于预处理）
+        self.image_processing_workers = postprocessing_config.get('image_processing_workers', 12)
+
         logger.info("帖子洞察分析器初始化完成")
+        logger.info(f"使用图片URL模式: {self.use_image_url}")
+        logger.info(f"图片处理并发数: {self.image_processing_workers}")
 
     def _calculate_content_complexity(self, post_text: str, image_count: int) -> str:
         """
@@ -182,6 +321,84 @@ class PostInsightsAnalyzer:
                 pass
         return list(set(image_urls)) # 去重
 
+    def _preprocess_images(self, all_image_urls: List[str]) -> None:
+        """
+        预处理所有图片，使用多线程下载和resize
+
+        Args:
+            all_image_urls: 所有需要处理的图片URL列表
+        """
+        if not all_image_urls or self.use_image_url:
+            # 如果使用URL模式，不需要预处理
+            return
+
+        # 去重
+        unique_urls = list(set(all_image_urls))
+        logger.info(f"开始预处理 {len(unique_urls)} 张唯一图片...")
+
+        # 使用线程池并发下载和处理图片
+        with ThreadPoolExecutor(max_workers=self.image_processing_workers, thread_name_prefix="ImagePreprocess") as executor:
+            future_to_url = {
+                executor.submit(download_and_resize_image, url): url
+                for url in unique_urls
+            }
+
+            success_count = 0
+            failed_count = 0
+
+            for future in as_completed(future_to_url):
+                url = future_to_url[future]
+                try:
+                    base64_data = future.result()
+                    self.image_cache[url] = base64_data
+                    if base64_data:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+                except Exception as e:
+                    logger.error(f"预处理图片 {url} 时发生异常: {e}")
+                    self.image_cache[url] = None
+                    failed_count += 1
+
+        logger.info(f"图片预处理完成: 成功 {success_count}, 失败 {failed_count}")
+
+    def _prepare_image_data(self, image_urls: List[str]) -> List[Dict[str, Any]]:
+        """
+        准备图片数据，根据配置返回URL或base64格式
+
+        Args:
+            image_urls: 图片URL列表
+
+        Returns:
+            图片数据列表
+        """
+        image_data_list = []
+
+        if self.use_image_url:
+            # URL模式：直接使用URL
+            for url in image_urls:
+                image_data_list.append({
+                    'type': 'url',
+                    'data': url,
+                    'url': url,
+                    'success': True
+                })
+        else:
+            # base64模式：从缓存获取
+            for url in image_urls:
+                base64_data = self.image_cache.get(url)
+                if base64_data:
+                    image_data_list.append({
+                        'type': 'base64',
+                        'data': base64_data,
+                        'url': url,
+                        'success': True
+                    })
+                else:
+                    logger.warning(f"图片缓存中未找到或处理失败: {url}")
+
+        return image_data_list
+
     def _analyze_single_post(self, post: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
         """分析单个帖子，返回帖子ID和分析结果字典"""
         post_id = post['id']
@@ -199,18 +416,48 @@ class PostInsightsAnalyzer:
                     image_count=len(image_urls),
                     interpretation_length=interpretation_length
                 )
-                image_data_list = [{'type': 'url', 'data': url, 'url': url, 'success': True} for url in image_urls]
+
+                # 准备图片数据（根据use_image_url配置决定URL或base64）
+                image_data_list = self._prepare_image_data(image_urls)
+
+                if not image_data_list:
+                    # 没有有效图片数据，记录失败
+                    error_msg = "没有有效图片数据（图片下载或处理失败）"
+                    logger.error(f"帖子 {post_id} {error_msg}")
+                    return post_id, {'error': error_msg}
+
+                # 第一次尝试：使用主VLM模型（3次重试）
                 response = self.llm_client.call_vlm(prompt, image_data_list)
                 model_name = self.llm_client.vlm_model
+
+                # 如果主VLM失败，尝试托底VLM模型
+                if not response or not response.get('success'):
+                    logger.warning(f"主VLM模型失败，尝试托底VLM模型处理帖子 {post_id}")
+                    response = self.llm_client.call_vlm(
+                        prompt,
+                        image_data_list,
+                        model_name=self.llm_client.vlm_fallback_model
+                    )
+                    model_name = self.llm_client.vlm_fallback_model
+
+                # 如果托底VLM也失败，记录为失败
+                if not response or not response.get('success'):
+                    error_msg = f"主VLM和托底VLM都失败: {response.get('error') if response else 'No response'}"
+                    logger.error(f"帖子 {post_id} {error_msg}")
+                    return post_id, {'error': error_msg}
+
             else:
                 # --- LLM (纯文本) 处理 ---
                 prompt = self.get_unified_text_prompt(post_content, interpretation_length=interpretation_length)
                 response = self.llm_client.call_fast_model(prompt)
                 model_name = self.llm_client.fast_model
 
-            if not response or not response.get('success'):
-                raise ValueError(f"LLM API调用失败: {response.get('error')}")
+                if not response or not response.get('success'):
+                    error_msg = f"LLM处理失败: {response.get('error') if response else 'No response'}"
+                    logger.error(f"帖子 {post_id} {error_msg}")
+                    return post_id, {'error': error_msg}
 
+            # 解析结果
             analysis_result = self._robust_json_parser(response['content'])
             if not analysis_result:
                 raise ValueError("无法从LLM响应中提取有效的JSON")
@@ -225,13 +472,27 @@ class PostInsightsAnalyzer:
     def run_analysis(self, hours_back: int, batch_size: int = 1000) -> Dict[str, Any]:
         """运行帖子洞察分析任务"""
         logger.info(f"开始运行帖子洞察分析任务，回溯 {hours_back} 小时，批次大小: {batch_size}")
-        
+
         try:
             posts = self.db_manager.get_posts_for_insight_analysis(hours_back=hours_back, limit=batch_size)
             if not posts:
                 logger.info("没有需要进行洞察分析的帖子")
                 return {'total': 0, 'success': 0, 'failed': 0}
 
+            logger.info(f"获取到 {len(posts)} 个需要分析的帖子")
+
+            # 如果使用base64模式，先预处理所有图片
+            if not self.use_image_url:
+                # 收集所有图片URL
+                all_image_urls = []
+                for post in posts:
+                    image_urls = self._extract_image_urls(post)
+                    all_image_urls.extend(image_urls)
+
+                # 预处理图片（多线程下载和resize）
+                self._preprocess_images(all_image_urls)
+
+            # 并发分析帖子
             success_count = 0
             failed_count = 0
 
