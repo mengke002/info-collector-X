@@ -10,7 +10,13 @@ from .config import config as app_config
 
 # 导入分析模块
 from .user_profiling import run_user_profiling
-from .intelligence_reports import run_daily_intelligence_report, run_kol_report
+from .intelligence_reports import (
+    run_daily_intelligence_report,
+    run_kol_report,
+    run_light_reports,
+    run_deep_report,
+    run_dual_reports
+)
 from .post_insights_analysis import run_post_insights_analysis_task as run_insights_task
 
 logger = logging.getLogger(__name__)
@@ -324,41 +330,124 @@ def run_user_profiling_analysis_task(limit: int = 50, days: int = 30) -> Dict[st
         }
 
 
-def run_intelligence_report_task(hours: int = 24, limit: int = 300) -> Dict[str, Any]:
-    """执行情报报告生成任务
+def run_intelligence_report_task(hours: int = 24, limit: int = 300, flow: str = 'dual') -> Dict[str, Any]:
+    """执行情报报告生成任务（支持双轨制流程选择）
 
     Args:
         hours: 时间范围（小时）
         limit: 最大帖子数量
+        flow: 流程类型 ('dual', 'light', 'deep', 'intelligence')
 
     Returns:
         任务执行结果
     """
     try:
-        logger.info(f"开始执行情报报告生成任务，时间范围: {hours}小时, 最大帖子数: {limit}")
-        result = run_daily_intelligence_report(hours, limit)
+        logger.info(f"开始执行情报报告生成任务，流程: {flow}, 时间范围: {hours}小时, 最大帖子数: {limit}")
 
-        if result['success']:
-            items_analyzed = result.get('items_analyzed', 0)
-            model_reports_count = len(result.get('model_reports', []))
+        # 根据flow类型调用不同的报告生成函数
+        if flow == 'dual':
+            # 双轨制：先日报资讯，后深度报告
+            result = run_dual_reports(hours, limit)
 
-            return {
-                'success': True,
-                'task_type': 'intelligence_report',
-                'report_title': result.get('report_title'),
-                'posts_analyzed': items_analyzed,
-                'time_range': result.get('time_range'),
-                'model_reports_count': model_reports_count,
-                'notion_push': result.get('notion_push'),
-                'message': f"情报报告生成成功: 使用{model_reports_count}个模型分析了{items_analyzed}条帖子"
-            }
+            if result['success']:
+                light_reports = result.get('light_reports', {})
+                deep_report = result.get('deep_report', {})
+
+                light_count = len(light_reports.get('model_reports', []))
+                deep_count = len(deep_report.get('model_reports', []))
+
+                return {
+                    'success': True,
+                    'task_type': 'dual_report',
+                    'items_analyzed': result.get('items_analyzed', 0),
+                    'light_reports_count': light_count,
+                    'deep_reports_count': deep_count,
+                    'message': f"双轨制报告生成成功: {light_count}份日报资讯 + {deep_count}份深度报告"
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('message', '双轨制报告生成失败'),
+                    'task_type': 'dual_report',
+                    'items_analyzed': result.get('items_analyzed', 0)
+                }
+
+        elif flow == 'light':
+            # 仅生成日报资讯
+            result = run_light_reports(hours, limit)
+
+            if result['success']:
+                model_reports_count = len(result.get('model_reports', []))
+                return {
+                    'success': True,
+                    'task_type': 'light_report',
+                    'items_analyzed': result.get('items_analyzed', 0),
+                    'model_reports_count': model_reports_count,
+                    'message': f"日报资讯生成成功: 使用{model_reports_count}个模型分析了{result.get('items_analyzed', 0)}条帖子"
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('error', '日报资讯生成失败'),
+                    'task_type': 'light_report',
+                    'items_analyzed': result.get('items_analyzed', 0)
+                }
+
+        elif flow == 'deep':
+            # 仅生成深度报告
+            result = run_deep_report(hours, limit)
+
+            if result['success']:
+                model_reports_count = len(result.get('model_reports', []))
+                return {
+                    'success': True,
+                    'task_type': 'deep_report',
+                    'items_analyzed': result.get('items_analyzed', 0),
+                    'model_reports_count': model_reports_count,
+                    'notion_push': result.get('model_reports', [{}])[0].get('notion_push') if result.get('model_reports') else None,
+                    'message': f"深度报告生成成功: 使用{model_reports_count}个模型分析了{result.get('items_analyzed', 0)}条帖子"
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('error', '深度报告生成失败'),
+                    'task_type': 'deep_report',
+                    'items_analyzed': result.get('items_analyzed', 0)
+                }
+
+        elif flow == 'intelligence':
+            # 原有的情报报告（多模型并行，无分类）
+            result = run_daily_intelligence_report(hours, limit)
+
+            if result['success']:
+                items_analyzed = result.get('items_analyzed', 0)
+                model_reports_count = len(result.get('model_reports', []))
+
+                return {
+                    'success': True,
+                    'task_type': 'intelligence_report',
+                    'report_title': result.get('report_title'),
+                    'posts_analyzed': items_analyzed,
+                    'time_range': result.get('time_range'),
+                    'model_reports_count': model_reports_count,
+                    'notion_push': result.get('notion_push'),
+                    'message': f"情报报告生成成功: 使用{model_reports_count}个模型分析了{items_analyzed}条帖子"
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('error'),
+                    'task_type': 'intelligence_report',
+                    'posts_analyzed': result.get('items_analyzed', 0),
+                    'failures': result.get('failures', [])
+                }
+
         else:
             return {
                 'success': False,
-                'error': result.get('error'),
-                'task_type': 'intelligence_report',
-                'posts_analyzed': result.get('items_analyzed', 0),
-                'failures': result.get('failures', [])
+                'error': f'未知的流程类型: {flow}',
+                'task_type': 'unknown',
+                'posts_analyzed': 0
             }
 
     except Exception as e:
@@ -366,7 +455,7 @@ def run_intelligence_report_task(hours: int = 24, limit: int = 300) -> Dict[str,
         return {
             'success': False,
             'error': str(e),
-            'task_type': 'intelligence_report',
+            'task_type': f'{flow}_report',
             'posts_analyzed': 0,
         }
 

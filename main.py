@@ -55,6 +55,8 @@ def main():
                        help='报告时间范围（小时）')
     parser.add_argument('--report-limit', type=int, default=300,
                        help='报告分析的最大帖子数量')
+    parser.add_argument('--flow', choices=['dual', 'light', 'deep', 'intelligence'], default='dual',
+                       help='报告生成流程 (dual=双轨制, light=仅日报资讯, deep=仅深度报告, intelligence=原有多模型并行)')
     parser.add_argument('--hours-back', type=int, default=36,
                        help='洞察分析回溯小时数')
     parser.add_argument('--user-id', type=int,
@@ -101,7 +103,7 @@ def main():
     elif args.task == 'user_analysis':
         result = run_user_profiling_analysis_task(limit=args.user_limit, days=args.days)
     elif args.task == 'intelligence_report':
-        result = run_intelligence_report_task(hours=args.hours, limit=args.report_limit)
+        result = run_intelligence_report_task(hours=args.hours, limit=args.report_limit, flow=args.flow)
     elif args.task == 'kol_report':
         if args.user_id is None:
             print("❌ KOL报告需要指定 --user-id 参数")

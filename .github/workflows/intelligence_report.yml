@@ -16,6 +16,16 @@ on:
         options:
         - intelligence
         - kol
+      report_flow:
+        description: '报告生成流程（仅intelligence类型有效）'
+        required: false
+        default: 'dual'
+        type: choice
+        options:
+          - dual        # 双轨制：先日报资讯，后深度报告
+          - light       # 仅生成日报资讯
+          - deep        # 仅生成深度报告
+          - intelligence # 原有多模型并行（无分类）
       hours:
         description: '情报报告时间范围（小时）'
         required: false
@@ -103,9 +113,9 @@ jobs:
     - name: 执行情报报告生成任务
       run: |
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then \
-          python3.12 main.py --task intelligence_report --hours ${{ github.event.inputs.hours }} --report-limit ${{ github.event.inputs.report_limit }}; \
+          python3.12 main.py --task intelligence_report --hours ${{ github.event.inputs.hours }} --report-limit ${{ github.event.inputs.report_limit }} --flow ${{ github.event.inputs.report_flow || 'dual' }}; \
         else \
-          python3.12 main.py --task intelligence_report --hours 24 --report-limit 200; \
+          python3.12 main.py --task intelligence_report --hours 24 --report-limit 200 --flow dual; \
         fi
 
   kol_report:

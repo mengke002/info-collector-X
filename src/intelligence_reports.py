@@ -300,6 +300,89 @@ class IntelligenceReportGenerator:
 
         return False
 
+    def get_light_report_prompt(self, formatted_context: str, time_range: str) -> str:
+        """
+        构建"日报资讯"提示词（全面信息流式的简报）
+        强调全面性和分类聚合
+        """
+        prompt_template = f"""# Role: 世界一流的科技资讯编辑，擅长快速提炼关键信息并分类呈现
+
+# Context:
+你正在为忙碌的科技从业者编写一份每日快讯。读者希望在最短时间内获取{time_range}内全球科技领域的重要动态。你收到的是经过筛选的X/Twitter技术领袖发布的帖子。
+
+# Core Principles:
+1. **全面覆盖 (Comprehensive Coverage)**: 尽可能涵盖所有有价值的信息点，不遗漏重要动态
+2. **分类清晰 (Clear Categorization)**: 按主题分类组织信息，便于快速查找
+3. **简洁精准 (Concise & Precise)**: 每条信息用3句话左右说清楚，突出核心要点
+4. **可追溯性 (Traceability)**: 每条信息必须标注来源 [Source: T_n]
+
+# Input Data Format:
+你将收到一系列帖子，格式为：
+- 纯文本帖：`[T_id @user_handle]` + 帖子内容
+- 图文帖：`[T_id @user_handle]` + 帖子内容 + `→ 洞察: {{AI解读}}`
+
+# Your Task:
+生成一份结构化的日报资讯，严格按照以下Markdown格式：
+
+## 📰 今日要闻
+*本节汇总最重要的5-10条核心新闻*
+- **[新闻标题]**: 简要描述（20-30字） [Source: T_n]
+
+---
+
+## 🔥 热门话题
+*按话题分类组织讨论热点*
+
+### 话题A: [话题名称]
+- 核心观点1 [Source: T_n]
+- 核心观点2 [Source: T_m]
+
+### 话题B: [话题名称]
+- 核心观点1 [Source: T_x]
+
+---
+
+## 💡 技术动态
+*新技术、新功能、技术讨论*
+- **[技术点]**: 简要说明 [Source: T_n]
+
+---
+
+## 🚀 产品发布
+*新产品、新功能发布*
+- **[产品名]**: 核心特性 [Source: T_n]
+
+---
+
+## 🛠️ 工具资源
+*有价值的工具、库、教程*
+- **[资源名]**: 用途说明 [Source: T_n]
+
+---
+
+## 📊 行业观察
+*行业趋势、商业分析、市场动态*
+- **[观察点]**: 关键信息 [Source: T_n]
+
+---
+
+## 🎯 精选观点
+*值得关注的独特见解*
+- **[@用户]**: 核心观点 [Source: T_n]
+
+# Input Data:
+```
+{formatted_context}
+```
+
+# Important Notes:
+1. 每个分类至少要有3-5条信息，如果某分类无内容可省略该分类
+2. 信息要全面，不要遗漏有价值的内容
+3. 每条信息必须有 [Source: T_n] 标注
+4. 保持简洁，每条信息3句话说清楚
+"""
+        return prompt_template
+
     def get_intelligence_report_prompt(
         self,
         formatted_context: str,
@@ -865,6 +948,660 @@ class IntelligenceReportGenerator:
             logger.error(f"生成情报报告时发生异常: {e}", exc_info=True)
             return self._create_error_response(f'生成异常: {str(e)}')
 
+    async def generate_light_reports(self, hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+        """
+        生成日报资讯（Light Reports）- 多模型并行生成
+
+        Args:
+            hours: 时间范围（小时）
+            limit: 最大帖子数量
+
+        Returns:
+            生成结果
+        """
+        self._log_task_start("日报资讯生成", hours=hours, limit=limit)
+
+        try:
+            # 计算时间范围
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=hours)
+
+            # 获取富化后的帖子数据
+            enriched_posts = self.db_manager.get_enriched_posts_for_report(
+                start_time,
+                end_time,
+                limit,
+                context_mode=self.context_mode,
+                exclude_tags=self.exclude_tags
+            )
+
+            if not enriched_posts:
+                logger.warning(f"在指定时间范围内没有找到富化的帖子数据")
+                return self._create_error_response('没有可用的帖子数据')
+
+            logger.info(f"获取到 {len(enriched_posts)} 条富化帖子数据，开始生成日报资讯")
+
+            # 格式化上下文
+            formatted_context, sources = self.format_enriched_posts_for_smart_llm(enriched_posts)
+
+            # 构建日报资讯提示词
+            time_range_str = f"过去{hours}小时"
+            prompt = self.get_light_report_prompt(formatted_context, time_range_str)
+
+            logger.info(f"日报资讯提示词长度: {len(prompt)} 字符")
+
+            # 获取要使用的模型列表
+            models_to_generate = self._get_report_models()
+            if not models_to_generate:
+                logger.warning("未配置任何可用于生成报告的模型")
+                return self._create_error_response('未配置可用的LLM模型')
+
+            model_reports: List[Dict[str, Any]] = []
+            failures: List[Dict[str, Any]] = []
+            tasks = []
+            task_meta: List[Dict[str, str]] = []
+
+            # 为每个模型创建并行任务
+            for model_name in models_to_generate:
+                display_name = self._get_model_display_name(model_name)
+                task_meta.append({'model': model_name, 'display': display_name})
+                tasks.append(
+                    self._generate_light_report_for_model(
+                        model_name=model_name,
+                        display_name=display_name,
+                        enriched_posts=enriched_posts,
+                        context_md=formatted_context,
+                        sources=sources,
+                        prompt=prompt,
+                        start_time=start_time,
+                        end_time=end_time
+                    )
+                )
+
+            logger.info(f"开始并行生成 {len(tasks)} 份日报资讯: {[meta['display'] for meta in task_meta]}")
+
+            # 并行执行所有任务
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 处理任务结果
+            for meta, task_result in zip(task_meta, task_results):
+                model_name = meta['model']
+                display_name = meta['display']
+
+                if isinstance(task_result, Exception):
+                    error_msg = str(task_result)
+                    logger.warning(f"模型 {model_name} ({display_name}) 日报资讯生成异常: {error_msg}")
+                    failures.append({
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': error_msg
+                    })
+                    continue
+
+                if task_result.get('success'):
+                    model_reports.append(task_result)
+                else:
+                    failures.append({
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': task_result.get('error', '报告生成失败')
+                    })
+
+            # 构建最终结果
+            overall_success = len(model_reports) > 0
+            result = {
+                'success': overall_success,
+                'items_analyzed': len(enriched_posts) if overall_success else 0,
+                'model_reports': model_reports,
+                'failures': failures,
+                'report_type': 'light'
+            }
+
+            self._log_task_complete(
+                "日报资讯生成",
+                len(model_reports),
+                len(failures),
+                models=len(models_to_generate)
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"生成日报资讯时发生异常: {e}", exc_info=True)
+            return self._create_error_response(f'生成异常: {str(e)}')
+
+    async def _generate_light_report_for_model(
+        self,
+        *,
+        model_name: str,
+        display_name: str,
+        enriched_posts: List[Dict[str, Any]],
+        context_md: str,
+        sources: List[Dict[str, Any]],
+        prompt: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> Dict[str, Any]:
+        """生成单个模型的日报资讯"""
+        return await asyncio.to_thread(
+            self._generate_light_report_for_model_sync,
+            model_name,
+            display_name,
+            enriched_posts,
+            context_md,
+            sources,
+            prompt,
+            start_time,
+            end_time
+        )
+
+    def _generate_light_report_for_model_sync(
+        self,
+        model_name: str,
+        display_name: str,
+        enriched_posts: List[Dict[str, Any]],
+        context_md: str,
+        sources: List[Dict[str, Any]],
+        prompt: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> Dict[str, Any]:
+        """同步执行单个模型的日报资讯生成和Notion推送"""
+
+        logger.info(f"[{display_name}] 开始生成日报资讯")
+
+        # 调用LLM生成报告
+        try:
+            response = self.llm_client.call_smart_model(prompt, model_override=model_name, temperature=0.3)
+
+            if not response or not response.get('success'):
+                error_msg = f"LLM调用失败: {response.get('error') if response else 'Unknown error'}"
+                logger.warning(f"[{display_name}] {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'model': model_name,
+                    'model_display': display_name
+                }
+
+            llm_output = response.get('content', '')
+        except Exception as e:
+            error_msg = f"LLM调用异常: {str(e)}"
+            logger.error(f"[{display_name}] {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg,
+                'model': model_name,
+                'model_display': display_name
+            }
+
+        # 为LLM生成的报告添加标准头部信息
+        beijing_time = self._bj_time()
+        header_info = [
+            f"# 📰 X/Twitter 技术日报资讯 - {display_name}",
+            "",
+            f"*报告生成时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
+            "",
+            f"*数据范围: {start_time.strftime('%Y-%m-%d %H:%M:%S')} - {end_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
+            "",
+            f"*分析动态数: {len(enriched_posts)} 条*",
+            "",
+            "---",
+            ""
+        ]
+
+        # 清理LLM输出
+        cleaned_llm_output = self._clean_llm_output_for_notion(llm_output)
+
+        sources_section = self._render_sources_section(sources)
+
+        # 构建报告尾部
+        footer_lines = ["", "---", ""]
+        provider = response.get('provider')
+        model = response.get('model')
+        if provider:
+            footer_lines.append(f"*分析引擎: {provider} ({model or 'unknown'})*")
+
+        footer_lines.extend([
+            "",
+            f"📊 **统计摘要**: 本报告分析了 {len(enriched_posts)} 条动态",
+            "",
+            "*本报告由AI自动生成，仅供参考*"
+        ])
+        footer_section = "\n".join(footer_lines)
+
+        report_content = "\n".join(header_info) + cleaned_llm_output + "\n\n" + sources_section + footer_section
+
+        # 应用来源链接增强
+        report_content = self._enhance_source_links(report_content, sources)
+
+        title = f"X技术日报资讯 - {display_name} - {end_time.strftime('%Y-%m-%d %H:%M')}"
+
+        # 保存报告到数据库
+        try:
+            if self.db_manager.save_intelligence_report(
+                'daily_light',
+                title,
+                report_content,
+                start_time,
+                end_time
+            ):
+                logger.info(f"[{display_name}] 日报资讯已成功保存到数据库")
+            else:
+                logger.warning(f"[{display_name}] 日报资讯保存到数据库失败")
+        except Exception as e:
+            logger.error(f"[{display_name}] 保存日报资讯到数据库时发生异常: {e}")
+
+        model_report = {
+            'model': model_name,
+            'model_display': display_name,
+            'success': True,
+            'report_title': title,
+            'report_content': report_content,
+            'provider': response.get('provider') if response else None,
+            'items_analyzed': len(enriched_posts)
+        }
+
+        # 尝试推送到Notion（使用层级结构）
+        notion_push_info = None
+        try:
+            beijing_time = self._bj_time()
+            time_str = beijing_time.strftime('%H:%M')
+            notion_title = f"[{time_str}] [{display_name}] X技术日报 ({len(enriched_posts)}条)"
+
+            logger.info(f"开始推送日报资讯到Notion ({display_name}): {notion_title}")
+
+            notion_result = x_intelligence_notion_client.create_report_page_in_hierarchy(
+                report_title=notion_title,
+                report_content=report_content,
+                report_date=beijing_time,
+                report_type='light'
+            )
+
+            if notion_result.get('success'):
+                logger.info(f"日报资讯成功推送到Notion ({display_name}): {notion_result.get('page_url')}")
+                notion_push_info = {
+                    'success': True,
+                    'page_url': notion_result.get('page_url'),
+                    'path': notion_result.get('path')
+                }
+            else:
+                error_msg = notion_result.get('error', '未知错误')
+                logger.warning(f"推送日报资讯到Notion失败 ({display_name}): {error_msg}")
+                notion_push_info = {
+                    'success': False,
+                    'error': error_msg
+                }
+
+        except Exception as e:
+            logger.warning(f"推送日报资讯到Notion时出错 ({display_name}): {e}")
+            notion_push_info = {
+                'success': False,
+                'error': str(e)
+            }
+
+        if notion_push_info:
+            model_report['notion_push'] = notion_push_info
+
+        return model_report
+
+    async def generate_deep_report(self, hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+        """
+        生成深度报告（Deep Report）- 多模型并行生成
+
+        Args:
+            hours: 时间范围（小时）
+            limit: 最大帖子数量
+
+        Returns:
+            生成结果
+        """
+        self._log_task_start("深度报告生成", hours=hours, limit=limit)
+
+        try:
+            # 计算时间范围
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=hours)
+
+            # 获取富化后的帖子数据
+            enriched_posts = self.db_manager.get_enriched_posts_for_report(
+                start_time,
+                end_time,
+                limit,
+                context_mode=self.context_mode,
+                exclude_tags=self.exclude_tags
+            )
+
+            if not enriched_posts:
+                logger.warning(f"在指定时间范围内没有找到富化的帖子数据")
+                return self._create_error_response('没有可用的帖子数据')
+
+            logger.info(f"获取到 {len(enriched_posts)} 条富化帖子数据，开始生成深度报告")
+
+            # 格式化上下文
+            formatted_context, sources = self.format_enriched_posts_for_smart_llm(enriched_posts)
+
+            # 构建深度报告提示词
+            time_range_str = f"过去{hours}小时"
+            prompt = self.get_intelligence_report_prompt(
+                formatted_context,
+                time_range_str,
+                context_mode=self.context_mode
+            )
+
+            logger.info(f"深度报告提示词长度: {len(prompt)} 字符")
+
+            # 获取要使用的模型列表
+            models_to_generate = self._get_report_models()
+            if not models_to_generate:
+                logger.warning("未配置任何可用于生成报告的模型")
+                return self._create_error_response('未配置可用的LLM模型')
+
+            model_reports: List[Dict[str, Any]] = []
+            failures: List[Dict[str, Any]] = []
+            tasks = []
+            task_meta: List[Dict[str, str]] = []
+
+            # 为每个模型创建并行任务
+            for model_name in models_to_generate:
+                display_name = self._get_model_display_name(model_name)
+                task_meta.append({'model': model_name, 'display': display_name})
+                tasks.append(
+                    self._generate_deep_report_for_model(
+                        model_name=model_name,
+                        display_name=display_name,
+                        enriched_posts=enriched_posts,
+                        context_md=formatted_context,
+                        sources=sources,
+                        prompt=prompt,
+                        start_time=start_time,
+                        end_time=end_time
+                    )
+                )
+
+            logger.info(f"开始并行生成 {len(tasks)} 份深度报告: {[meta['display'] for meta in task_meta]}")
+
+            # 并行执行所有任务
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 处理任务结果
+            for meta, task_result in zip(task_meta, task_results):
+                model_name = meta['model']
+                display_name = meta['display']
+
+                if isinstance(task_result, Exception):
+                    error_msg = str(task_result)
+                    logger.warning(f"模型 {model_name} ({display_name}) 深度报告生成异常: {error_msg}")
+                    failures.append({
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': error_msg
+                    })
+                    continue
+
+                if task_result.get('success'):
+                    model_reports.append(task_result)
+                else:
+                    failures.append({
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': task_result.get('error', '报告生成失败')
+                    })
+
+            # 构建最终结果
+            overall_success = len(model_reports) > 0
+            result = {
+                'success': overall_success,
+                'items_analyzed': len(enriched_posts) if overall_success else 0,
+                'model_reports': model_reports,
+                'failures': failures,
+                'report_type': 'deep'
+            }
+
+            self._log_task_complete(
+                "深度报告生成",
+                len(model_reports),
+                len(failures),
+                models=len(models_to_generate)
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"生成深度报告时发生异常: {e}", exc_info=True)
+            return self._create_error_response(f'生成异常: {str(e)}')
+
+    async def _generate_deep_report_for_model(
+        self,
+        *,
+        model_name: str,
+        display_name: str,
+        enriched_posts: List[Dict[str, Any]],
+        context_md: str,
+        sources: List[Dict[str, Any]],
+        prompt: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> Dict[str, Any]:
+        """生成深度报告"""
+        return await asyncio.to_thread(
+            self._generate_deep_report_for_model_sync,
+            model_name,
+            display_name,
+            enriched_posts,
+            context_md,
+            sources,
+            prompt,
+            start_time,
+            end_time
+        )
+
+    def _generate_deep_report_for_model_sync(
+        self,
+        model_name: str,
+        display_name: str,
+        enriched_posts: List[Dict[str, Any]],
+        context_md: str,
+        sources: List[Dict[str, Any]],
+        prompt: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> Dict[str, Any]:
+        """同步执行深度报告生成和Notion推送"""
+
+        logger.info(f"[{display_name}] 开始生成深度报告")
+
+        # 调用LLM生成报告
+        try:
+            response = self.llm_client.call_smart_model(prompt, model_override=model_name, temperature=0.4)
+
+            if not response or not response.get('success'):
+                error_msg = f"LLM调用失败: {response.get('error') if response else 'Unknown error'}"
+                logger.warning(f"[{display_name}] {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'model': model_name,
+                    'model_display': display_name
+                }
+
+            llm_output = response.get('content', '')
+        except Exception as e:
+            error_msg = f"LLM调用异常: {str(e)}"
+            logger.error(f"[{display_name}] {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg,
+                'model': model_name,
+                'model_display': display_name
+            }
+
+        # 为LLM生成的报告添加标准头部信息
+        beijing_time = self._bj_time()
+        header_info = [
+            f"# 📊 X/Twitter 技术情报深度报告 - {display_name}",
+            "",
+            f"*报告生成时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
+            "",
+            f"*数据范围: {start_time.strftime('%Y-%m-%d %H:%M:%S')} - {end_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
+            "",
+            f"*分析动态数: {len(enriched_posts)} 条*",
+            "",
+            "---",
+            ""
+        ]
+
+        # 清理LLM输出
+        cleaned_llm_output = self._clean_llm_output_for_notion(llm_output)
+
+        sources_section = self._render_sources_section(sources)
+
+        # 构建报告尾部
+        footer_lines = ["", "---", ""]
+        provider = response.get('provider')
+        model = response.get('model')
+        if provider:
+            footer_lines.append(f"*分析引擎: {provider} ({model or 'unknown'})*")
+
+        footer_lines.extend([
+            "",
+            f"📊 **统计摘要**: 本报告分析了 {len(enriched_posts)} 条动态",
+            "",
+            "*本报告由AI自动生成，仅供参考*"
+        ])
+        footer_section = "\n".join(footer_lines)
+
+        report_content = "\n".join(header_info) + cleaned_llm_output + "\n\n" + sources_section + footer_section
+
+        # 应用来源链接增强
+        report_content = self._enhance_source_links(report_content, sources)
+
+        title = f"X技术情报深度报告 - {display_name} - {end_time.strftime('%Y-%m-%d %H:%M')}"
+
+        # 保存报告到数据库
+        try:
+            if self.db_manager.save_intelligence_report(
+                'daily_deep',
+                title,
+                report_content,
+                start_time,
+                end_time
+            ):
+                logger.info(f"[{display_name}] 深度报告已成功保存到数据库")
+            else:
+                logger.warning(f"[{display_name}] 深度报告保存到数据库失败")
+        except Exception as e:
+            logger.error(f"[{display_name}] 保存深度报告到数据库时发生异常: {e}")
+
+        model_report = {
+            'model': model_name,
+            'model_display': display_name,
+            'success': True,
+            'report_title': title,
+            'report_content': report_content,
+            'provider': response.get('provider') if response else None,
+            'items_analyzed': len(enriched_posts)
+        }
+
+        # 尝试推送到Notion（使用层级结构）
+        notion_push_info = None
+        try:
+            beijing_time = self._bj_time()
+            time_str = beijing_time.strftime('%H:%M')
+            notion_title = f"[{time_str}] [{display_name}] X技术深度报告 ({len(enriched_posts)}条)"
+
+            logger.info(f"开始推送深度报告到Notion ({display_name}): {notion_title}")
+
+            notion_result = x_intelligence_notion_client.create_report_page_in_hierarchy(
+                report_title=notion_title,
+                report_content=report_content,
+                report_date=beijing_time,
+                report_type='deep'
+            )
+
+            if notion_result.get('success'):
+                logger.info(f"深度报告成功推送到Notion ({display_name}): {notion_result.get('page_url')}")
+                notion_push_info = {
+                    'success': True,
+                    'page_url': notion_result.get('page_url'),
+                    'path': notion_result.get('path')
+                }
+            else:
+                error_msg = notion_result.get('error', '未知错误')
+                logger.warning(f"推送深度报告到Notion失败 ({display_name}): {error_msg}")
+                notion_push_info = {
+                    'success': False,
+                    'error': error_msg
+                }
+
+        except Exception as e:
+            logger.warning(f"推送深度报告到Notion时出错 ({display_name}): {e}")
+            notion_push_info = {
+                'success': False,
+                'error': str(e)
+            }
+
+        if notion_push_info:
+            model_report['notion_push'] = notion_push_info
+
+        return model_report
+
+    async def run_dual_report_generation(self, hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+        """
+        运行双轨制报告生成流程
+        先生成所有日报资讯，再生成深度报告
+
+        Args:
+            hours: 时间范围（小时）
+            limit: 最大帖子数量
+
+        Returns:
+            综合结果
+        """
+        logger.info(f"开始执行双轨制报告生成流程: hours={hours}, limit={limit}")
+
+        dual_results = {
+            'success': True,
+            'light_reports': None,
+            'deep_report': None
+        }
+
+        # 第一步: 生成日报资讯
+        logger.info("=== 第一步: 生成日报资讯 ===")
+        light_result = await self.generate_light_reports(hours, limit)
+        dual_results['light_reports'] = light_result
+
+        if not light_result.get('success'):
+            logger.warning("日报资讯生成失败，但继续执行深度报告")
+            dual_results['success'] = False
+        else:
+            logger.info(f"日报资讯生成完成: {len(light_result.get('model_reports', []))} 个模型成功")
+
+        # 第二步: 生成深度报告
+        logger.info("=== 第二步: 生成深度报告 ===")
+        deep_result = await self.generate_deep_report(hours, limit)
+        dual_results['deep_report'] = deep_result
+
+        if not deep_result.get('success'):
+            logger.error("深度报告生成失败")
+            dual_results['success'] = False
+        else:
+            logger.info("深度报告生成完成")
+
+        # 汇总统计
+        total_items = 0
+        if light_result.get('success'):
+            total_items = light_result.get('items_analyzed', 0)
+        elif deep_result.get('success'):
+            total_items = deep_result.get('items_analyzed', 0)
+
+        dual_results['items_analyzed'] = total_items
+        dual_results['message'] = f"双轨制报告生成{'成功' if dual_results['success'] else '部分失败'}"
+
+        logger.info(f"双轨制报告生成流程完成: {dual_results['message']}")
+
+        return dual_results
+
     def generate_kol_report(self, user_id: int, days: int = 30) -> Dict[str, Any]:
         """
         生成KOL思想轨迹报告
@@ -1009,7 +1746,7 @@ class IntelligenceReportGenerator:
 
 def run_daily_intelligence_report(hours: int = 24, limit: int = 300) -> Dict[str, Any]:
     """
-    便捷函数：运行日度情报报告生成
+    便捷函数：运行日度情报报告生成（保留兼容性，使用原有的多模型并行方式）
 
     Args:
         hours: 时间范围（小时）
@@ -1020,6 +1757,51 @@ def run_daily_intelligence_report(hours: int = 24, limit: int = 300) -> Dict[str
     """
     generator = IntelligenceReportGenerator()
     return asyncio.run(generator.generate_intelligence_report(hours, limit))
+
+
+def run_light_reports(hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+    """
+    便捷函数：运行日报资讯生成
+
+    Args:
+        hours: 时间范围（小时）
+        limit: 最大帖子数量
+
+    Returns:
+        生成结果
+    """
+    generator = IntelligenceReportGenerator()
+    return asyncio.run(generator.generate_light_reports(hours, limit))
+
+
+def run_deep_report(hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+    """
+    便捷函数：运行深度报告生成
+
+    Args:
+        hours: 时间范围（小时）
+        limit: 最大帖子数量
+
+    Returns:
+        生成结果
+    """
+    generator = IntelligenceReportGenerator()
+    return asyncio.run(generator.generate_deep_report(hours, limit))
+
+
+def run_dual_reports(hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+    """
+    便捷函数：运行双轨制报告生成（先日报资讯，后深度报告）
+
+    Args:
+        hours: 时间范围（小时）
+        limit: 最大帖子数量
+
+    Returns:
+        生成结果
+    """
+    generator = IntelligenceReportGenerator()
+    return asyncio.run(generator.run_dual_report_generation(hours, limit))
 
 
 def run_kol_report(user_id: int, days: int = 30) -> Dict[str, Any]:
