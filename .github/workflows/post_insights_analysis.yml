@@ -40,12 +40,14 @@ jobs:
 
     - name: 执行帖子洞察分析任务
       env:
+        # 数据库配置
         DB_HOST: ${{ secrets.DB_HOST }}
         DB_PORT: ${{ secrets.DB_PORT }}
         DB_NAME: ${{ secrets.DB_NAME }}
         DB_USER: ${{ secrets.DB_USER }}
         DB_PASSWORD: ${{ secrets.DB_PASSWORD || secrets.MYSQL_PASSWORD }}
         MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD || secrets.DB_PASSWORD }}
+
         # LLM配置
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
@@ -54,5 +56,13 @@ jobs:
         LLM_FAST_VLM_NAME: ${{ secrets.LLM_FAST_VLM_NAME }}
         LLM_FAST_VLM_FALLBACK_NAME: ${{ secrets.LLM_FAST_VLM_FALLBACK_NAME }}
         LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+
+        # VLM图片处理配置
+        VLM_USE_IMAGE_URL: ${{ secrets.VLM_USE_IMAGE_URL || 'false' }}
+
+        # 并发配置
+        EXECUTOR_FAST_LLM_WORKERS: ${{ secrets.EXECUTOR_FAST_LLM_WORKERS }}
+        EXECUTOR_FAST_VLM_WORKERS: ${{ secrets.EXECUTOR_FAST_VLM_WORKERS }}
+        EXECUTOR_IMAGE_PROCESSING_WORKERS: ${{ secrets.EXECUTOR_IMAGE_PROCESSING_WORKERS }}
       run: |
         python3.12 main.py --task post_insights --batch-size ${{ github.event.inputs.batch_size || '1000' }} --hours-back ${{ github.event.inputs.hours_back || '36' }}
