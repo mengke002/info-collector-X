@@ -140,7 +140,7 @@ class DatabaseManager:
         return """
         CREATE TABLE IF NOT EXISTS `intelligence_reports` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `report_type` ENUM('daily', 'weekly', 'monthly_kol') NOT NULL COMMENT '报告类型',
+          `report_type` ENUM('daily', 'daily_light', 'daily_deep', 'monthly_kol') NOT NULL COMMENT '报告类型',
           `report_title` VARCHAR(512) NOT NULL COMMENT '报告标题',
           `report_content` MEDIUMTEXT NOT NULL COMMENT '报告内容 (Markdown格式)',
           `time_range_start` DATETIME COMMENT '报告覆盖的开始时间',
