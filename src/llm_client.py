@@ -28,6 +28,7 @@ class LLMClient:
         self.vlm_fallback_model = llm_config.get('fast_vlm_fallback_model_name', 'gpt-4-vision-preview')
         self.smart_model = llm_config.get('smart_model_name', 'gpt-4.1')
         self.report_models = llm_config.get('report_models', [])
+        self.max_tokens = llm_config.get('max_tokens', 20000)
 
         if not self.api_key:
             raise ValueError("未找到OPENAI_API_KEY配置，请在环境变量或config.ini中设置")
@@ -40,6 +41,7 @@ class LLMClient:
         self.logger.info(f"VLM Fallback Model: {self.vlm_fallback_model}")
         self.logger.info(f"Smart Model: {self.smart_model}")
         self.logger.info(f"Report Models: {self.report_models}")
+        self.logger.info(f"Max Tokens: {self.max_tokens}")
 
     def call_fast_model(self, prompt: str, temperature: float = 0.1, max_retries: int = 3) -> Dict[str, Any]:
         """
@@ -167,6 +169,7 @@ class LLMClient:
                         "content": content
                     }],
                     temperature=temperature,
+                    max_tokens=self.max_tokens,
                     stream=True
                 )
 
@@ -270,10 +273,11 @@ class LLMClient:
                 response = self.client.chat.completions.create(
                     model=model_name,
                     messages=[
-                        {'role': 'system', 'content': '你是一个专业的内容分析师，擅长总结和提取关键信息。'},
+                        {'role': 'system', 'content': '你是一个专业的内容分析师,擅长总结和提取关键信息。'},
                         {'role': 'user', 'content': prompt}
                     ],
                     temperature=temperature,
+                    max_tokens=self.max_tokens,
                     stream=True
                 )
 
