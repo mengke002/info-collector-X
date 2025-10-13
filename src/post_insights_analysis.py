@@ -69,7 +69,7 @@ def download_and_resize_image(url: str, max_dimension: int = 1024, timeout: int 
             with Image.open(temp_path) as img:
                 logger.debug(f"成功打开图片: {url}, 格式: {img.format}, 模式: {img.mode}, 尺寸: {img.size}")
 
-                # 转换RGBA模式以支持透明度
+                # 转换图片模式以支持各种格式
                 if img.mode in ('RGBA', 'LA'):
                     # 创建白色背景
                     background = Image.new('RGB', img.size, (255, 255, 255))
@@ -78,6 +78,15 @@ def download_and_resize_image(url: str, max_dimension: int = 1024, timeout: int 
                     else:
                         background.paste(img, mask=img.split()[-1])
                     img = background
+                elif img.mode == 'P':
+                    # 调色板模式，先转换为RGBA再转RGB（避免透明度警告）
+                    if 'transparency' in img.info:
+                        img = img.convert('RGBA')
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        background.paste(img, mask=img.split()[-1])
+                        img = background
+                    else:
+                        img = img.convert('RGB')
                 elif img.mode not in ('RGB', 'L'):
                     img = img.convert('RGB')
 
