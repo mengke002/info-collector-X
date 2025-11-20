@@ -46,5 +46,9 @@ jobs:
         CRAWL_HIGH_LIMIT: ${{ secrets.CRAWL_HIGH_LIMIT }}
         CRAWL_MEDIUM_LIMIT: ${{ secrets.CRAWL_MEDIUM_LIMIT }}
         CRAWL_LOW_LIMIT: ${{ secrets.CRAWL_LOW_LIMIT }}
+        CRAWL_MEDIUM_INTERVAL_MINUTES: ${{ secrets.CRAWL_MEDIUM_INTERVAL_MINUTES }}
+        CRAWL_LOW_INTERVAL_HOURS: ${{ secrets.CRAWL_LOW_INTERVAL_HOURS }}
+        CRAWLER_REQUEST_DELAY_MIN: ${{ secrets.CRAWLER_REQUEST_DELAY_MIN }}
+        CRAWLER_REQUEST_DELAY_MAX: ${{ secrets.CRAWLER_REQUEST_DELAY_MAX }}
       run: |
         python3.12 main.py --task low_freq --max-workers ${{ github.event.inputs.max_workers || '2' }}

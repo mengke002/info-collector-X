@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 from .processor import UserDataProcessor
 from .database import DatabaseManager
 from .config import config as app_config
+from .utils import restart_hf_space
 
 # 导入分析模块
 from .user_profiling import run_user_profiling
@@ -77,29 +78,47 @@ def run_crawl_task(crawl_group: str, max_workers: int = 1, limit: Optional[int] 
         logger.info(f"开始处理 {crawl_group} 分组任务，共 {len(users)} 个用户")
 
         # 引入分批处理逻辑，避免一次处理过多用户导致封禁风险
-        # 默认每批50个用户
-        batch_size = 50
+        # 默认每批40个用户 (40是80的因数，配合重启阈值使用)
+        batch_size = 40
+        # 重启阈值：每处理多少个用户重启一次HF Space
+        restart_threshold = 80
+
         total_processed = 0
         total_success = 0
         total_failed = 0
         total_posts = 0
         total_elapsed = 0
+        users_since_last_restart = 0
 
         for i in range(0, len(users), batch_size):
             batch_users = users[i:i + batch_size]
             batch_num = i // batch_size + 1
             total_batches = (len(users) + batch_size - 1) // batch_size
 
+            # 检查是否需要重启 HF Space
+            # 注意：如果是第一批(i=0)，不需要重启
+            if i > 0 and users_since_last_restart >= restart_threshold:
+                logger.info(f"已处理 {users_since_last_restart} 个用户，达到重启阈值 ({restart_threshold})，正在重启 Hugging Face Space...")
+                # 尝试重启，如果失败不中断任务
+                try:
+                    restart_hf_space()
+                except Exception as e:
+                    logger.error(f"尝试重启HF Space时出错: {e}")
+
+                users_since_last_restart = 0
+
             logger.info(f"处理第 {batch_num}/{total_batches} 批，{len(batch_users)} 个用户")
 
             batch_result = processor.process_users_batch(batch_users, max_workers,
-                                                       delay_after_batch=(batch_num < total_batches))
+                                                       delay_after_batch=False)
 
             total_processed += batch_result['users_processed']
             total_success += batch_result['users_success']
             total_failed += batch_result['users_failed']
             total_posts += batch_result['posts_inserted']
             total_elapsed += batch_result['elapsed_seconds']
+
+            users_since_last_restart += len(batch_users)
 
         return {
             'success': True,

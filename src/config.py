@@ -140,8 +140,8 @@ class Config:
             'request_timeout': self._get_config_value('crawler', 'request_timeout', 'CRAWLER_REQUEST_TIMEOUT', 30, int),
             'retry_attempts': self._get_config_value('crawler', 'retry_attempts', 'CRAWLER_RETRY_ATTEMPTS', 3, int),
             'retry_delay': self._get_config_value('crawler', 'retry_delay', 'CRAWLER_RETRY_DELAY', 5, int),
-            'request_delay_min': self._get_config_value('crawler', 'request_delay_min', 'CRAWLER_REQUEST_DELAY_MIN', 2, int),
-            'request_delay_max': self._get_config_value('crawler', 'request_delay_max', 'CRAWLER_REQUEST_DELAY_MAX', 6, int),
+            'request_delay_min': self._get_config_value('crawler', 'request_delay_min', 'CRAWLER_REQUEST_DELAY_MIN', 1, int),
+            'request_delay_max': self._get_config_value('crawler', 'request_delay_max', 'CRAWLER_REQUEST_DELAY_MAX', 4, int),
         }
 
     def get_sleep_window_config(self) -> Dict[str, int]:
@@ -160,8 +160,8 @@ class Config:
     def get_task_limits_config(self) -> Dict[str, int]:
         """获取每次任务处理的用户数量上限配置。"""
         return {
-            'high_limit': self._get_config_value('task_limits', 'high_limit', 'CRAWL_HIGH_LIMIT', 50, int),
-            'medium_limit': self._get_config_value('task_limits', 'medium_limit', 'CRAWL_MEDIUM_LIMIT', 200, int),
+            'high_limit': self._get_config_value('task_limits', 'high_limit', 'CRAWL_HIGH_LIMIT', 80, int),
+            'medium_limit': self._get_config_value('task_limits', 'medium_limit', 'CRAWL_MEDIUM_LIMIT', 300, int),
             'low_limit': self._get_config_value('task_limits', 'low_limit', 'CRAWL_LOW_LIMIT', 300, int),
         }
 
