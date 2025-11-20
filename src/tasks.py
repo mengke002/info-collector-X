@@ -377,24 +377,25 @@ def run_user_profiling_analysis_task(limit: int = 50, days: int = 30) -> Dict[st
         }
 
 
-def run_intelligence_report_task(hours: int = 24, limit: int = 300, flow: str = 'dual') -> Dict[str, Any]:
+def run_intelligence_report_task(hours: int = 24, limit: int = 300, flow: str = 'dual', candidate_multiplier: Optional[float] = None) -> Dict[str, Any]:
     """执行情报报告生成任务（支持双轨制流程选择）
 
     Args:
         hours: 时间范围（小时）
         limit: 最大帖子数量
         flow: 流程类型 ('dual', 'light', 'deep', 'intelligence')
+        candidate_multiplier: 候选池倍数
 
     Returns:
         任务执行结果
     """
     try:
-        logger.info(f"开始执行情报报告生成任务，流程: {flow}, 时间范围: {hours}小时, 最大帖子数: {limit}")
+        logger.info(f"开始执行情报报告生成任务，流程: {flow}, 时间范围: {hours}小时, 最大帖子数: {limit}, 候选倍数: {candidate_multiplier}")
 
         # 根据flow类型调用不同的报告生成函数
         if flow == 'dual':
             # 双轨制：先日报资讯，后深度报告
-            result = run_dual_reports(hours, limit)
+            result = run_dual_reports(hours, limit, candidate_multiplier)
 
             if result['success']:
                 light_reports = result.get('light_reports', {})
@@ -421,7 +422,7 @@ def run_intelligence_report_task(hours: int = 24, limit: int = 300, flow: str = 
 
         elif flow == 'light':
             # 仅生成日报资讯
-            result = run_light_reports(hours, limit)
+            result = run_light_reports(hours, limit, candidate_multiplier)
 
             if result['success']:
                 model_reports_count = len(result.get('model_reports', []))
@@ -442,7 +443,7 @@ def run_intelligence_report_task(hours: int = 24, limit: int = 300, flow: str = 
 
         elif flow == 'deep':
             # 仅生成深度报告
-            result = run_deep_report(hours, limit)
+            result = run_deep_report(hours, limit, candidate_multiplier)
 
             if result['success']:
                 model_reports_count = len(result.get('model_reports', []))
@@ -464,7 +465,7 @@ def run_intelligence_report_task(hours: int = 24, limit: int = 300, flow: str = 
 
         elif flow == 'intelligence':
             # 原有的情报报告（多模型并行，无分类）
-            result = run_daily_intelligence_report(hours, limit)
+            result = run_daily_intelligence_report(hours, limit, candidate_multiplier)
 
             if result['success']:
                 items_analyzed = result.get('items_analyzed', 0)
