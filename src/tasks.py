@@ -74,11 +74,42 @@ def run_crawl_task(crawl_group: str, max_workers: int = 1, limit: Optional[int] 
                 'message': f'没有找到 {crawl_group} 分组的待爬取用户'
             }
 
-        # 批量处理用户
-        result = processor.process_users_batch(users, max_workers)
-        result['crawl_group'] = crawl_group
+        logger.info(f"开始处理 {crawl_group} 分组任务，共 {len(users)} 个用户")
 
-        return result
+        # 引入分批处理逻辑，避免一次处理过多用户导致封禁风险
+        # 默认每批50个用户
+        batch_size = 50
+        total_processed = 0
+        total_success = 0
+        total_failed = 0
+        total_posts = 0
+        total_elapsed = 0
+
+        for i in range(0, len(users), batch_size):
+            batch_users = users[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            total_batches = (len(users) + batch_size - 1) // batch_size
+
+            logger.info(f"处理第 {batch_num}/{total_batches} 批，{len(batch_users)} 个用户")
+
+            batch_result = processor.process_users_batch(batch_users, max_workers,
+                                                       delay_after_batch=(batch_num < total_batches))
+
+            total_processed += batch_result['users_processed']
+            total_success += batch_result['users_success']
+            total_failed += batch_result['users_failed']
+            total_posts += batch_result['posts_inserted']
+            total_elapsed += batch_result['elapsed_seconds']
+
+        return {
+            'success': True,
+            'users_processed': total_processed,
+            'users_success': total_success,
+            'users_failed': total_failed,
+            'posts_inserted': total_posts,
+            'elapsed_seconds': total_elapsed,
+            'crawl_group': crawl_group
+        }
 
     except Exception as e:
         logger.error(f"爬取任务执行失败: {e}")
