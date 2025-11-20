@@ -87,6 +87,11 @@ def run_crawl_task(crawl_group: str, max_workers: int = 1, limit: Optional[int] 
         total_posts = 0
         total_elapsed = 0
 
+        try:
+            restart_hf_space()
+        except Exception as e:
+            logger.error(f"尝试重启HF Space时出错: {e}")
+                    
         for i in range(0, len(users), batch_size):
             batch_users = users[i:i + batch_size]
             batch_num = i // batch_size + 1
