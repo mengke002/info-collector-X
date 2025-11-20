@@ -140,6 +140,8 @@ class Config:
             'request_timeout': self._get_config_value('crawler', 'request_timeout', 'CRAWLER_REQUEST_TIMEOUT', 30, int),
             'retry_attempts': self._get_config_value('crawler', 'retry_attempts', 'CRAWLER_RETRY_ATTEMPTS', 3, int),
             'retry_delay': self._get_config_value('crawler', 'retry_delay', 'CRAWLER_RETRY_DELAY', 5, int),
+            'request_delay_min': self._get_config_value('crawler', 'request_delay_min', 'CRAWLER_REQUEST_DELAY_MIN', 2, int),
+            'request_delay_max': self._get_config_value('crawler', 'request_delay_max', 'CRAWLER_REQUEST_DELAY_MAX', 6, int),
         }
 
     def get_sleep_window_config(self) -> Dict[str, int]:

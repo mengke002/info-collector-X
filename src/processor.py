@@ -133,7 +133,10 @@ class UserDataProcessor:
 
                 # 单个用户处理完成后的延迟
                 if len(results) < len(users):  # 不是最后一个用户
-                    delay = random.uniform(1, 5)
+                    delay = random.uniform(
+                        self.crawler_config.get('request_delay_min', 2),
+                        self.crawler_config.get('request_delay_max', 6)
+                    )
                     logger.debug(f"用户间延迟 {delay:.1f} 秒")
                     time.sleep(delay)
         else:
@@ -147,7 +150,10 @@ class UserDataProcessor:
 
                     # 在并发场景下为任务提交增加轻量随机延迟，避免短时间内触发大量请求
                     if idx < len(users) - 1:
-                        delay = random.uniform(1.5, 4.0)
+                        delay = random.uniform(
+                            self.crawler_config.get('request_delay_min', 2),
+                            self.crawler_config.get('request_delay_max', 6)
+                        )
                         logger.debug(f"并发模式任务提交延迟 {delay:.1f} 秒")
                         time.sleep(delay)
 
@@ -168,8 +174,9 @@ class UserDataProcessor:
                             'error': str(e)
                         })
 
-        # 批次处理完成后的延迟（仅在需要时）
-        if delay_after_batch and max_workers > 1:
+        # 批次处理完成后的延迟
+        # 注意：即使 max_workers=1（串行），如果有明确要求延迟批次，也应该执行延迟
+        if delay_after_batch:
             batch_delay = random.uniform(
                 self.crawler_config['batch_interval_min'],
                 self.crawler_config['batch_interval_max']
