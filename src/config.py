@@ -243,6 +243,84 @@ class Config:
             'image_processing_workers': self._get_config_value('postprocessing', 'image_processing_workers', 'EXECUTOR_IMAGE_PROCESSING_WORKERS', 12, int),
         }
 
+    def get_scoring_config(self) -> Dict[str, Any]:
+        """获取评分配置
+        优先顺序:
+        1. 环境变量 SCORING_CONFIG (必须是JSON字符串)
+        2. config.ini 中的 [scoring] 节
+        3. 默认硬编码配置
+        """
+        import json
+
+        # 1. 尝试从整体的环境变量JSON获取
+        env_config_str = os.getenv('SCORING_CONFIG')
+        if env_config_str:
+            try:
+                env_config = json.loads(env_config_str)
+                # 确保至少有一些关键key，否则可能解析错了
+                if isinstance(env_config, dict):
+                    logger.info("使用 SCORING_CONFIG 环境变量覆盖评分配置")
+                    return env_config
+            except json.JSONDecodeError:
+                logger.warning("环境变量 SCORING_CONFIG 不是有效的 JSON 字符串，将忽略")
+
+        # 2. & 3. 从配置文件或默认值构建
+        # 解析 content_type_scores 和 tag_scores 的JSON字符串
+        # 默认值
+        default_content_type_scores = {
+            "教程/指南": 10,
+            "观点/评论": 8,
+            "项目更新": 7,
+            "读书/学习笔记": 6,
+            "新闻/快讯": 5,
+            "提问/求助": 2,
+            "推广/广告": -10
+        }
+
+        default_tag_scores = {
+            "技术讨论": 10,
+            "产品发布": 9,
+            "投资分析": 8,
+            "创业心路": 6,
+            "工具推荐": 7,
+            "资源分享": 7,
+            "时事评论": 3,
+            "生活感悟": 3
+        }
+
+        # 获取 content_type_scores
+        ct_scores_str = self._get_config_value('scoring', 'content_type_scores', 'SCORING_CONTENT_TYPE_SCORES', '', str)
+        if ct_scores_str:
+            try:
+                content_type_scores = json.loads(ct_scores_str)
+            except json.JSONDecodeError:
+                logger.warning("content_type_scores 配置解析失败，使用默认值")
+                content_type_scores = default_content_type_scores
+        else:
+            content_type_scores = default_content_type_scores
+
+        # 获取 tag_scores
+        tag_scores_str = self._get_config_value('scoring', 'tag_scores', 'SCORING_TAG_SCORES', '', str)
+        if tag_scores_str:
+            try:
+                tag_scores = json.loads(tag_scores_str)
+            except json.JSONDecodeError:
+                logger.warning("tag_scores 配置解析失败，使用默认值")
+                tag_scores = default_tag_scores
+        else:
+            tag_scores = default_tag_scores
+
+        return {
+            'candidate_multiplier': self._get_config_value('scoring', 'candidate_multiplier', 'SCORING_CANDIDATE_MULTIPLIER', 3, int),
+            'base_score': self._get_config_value('scoring', 'base_score', 'SCORING_BASE_SCORE', 1.0, float),
+            'post_length_weight': self._get_config_value('scoring', 'post_length_weight', 'SCORING_POST_LENGTH_WEIGHT', 0.01, float),
+            'interpretation_length_weight': self._get_config_value('scoring', 'interpretation_length_weight', 'SCORING_INTERPRETATION_LENGTH_WEIGHT', 0.01, float),
+            'media_bonus': self._get_config_value('scoring', 'media_bonus', 'SCORING_MEDIA_BONUS', 2.0, float),
+            'link_bonus': self._get_config_value('scoring', 'link_bonus', 'SCORING_LINK_BONUS', 1.0, float),
+            'content_type_scores': content_type_scores,
+            'tag_scores': tag_scores
+        }
+
 
 # 全局配置实例
 config = Config()

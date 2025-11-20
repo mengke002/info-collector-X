@@ -15,6 +15,7 @@ from .database import DatabaseManager
 from .llm_client import get_llm_client
 from .config import config
 from .notion_client import x_intelligence_notion_client
+from .scoring import calculate_value_score
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ class IntelligenceReportGenerator:
         llm_config = config.get_llm_config()
         self.max_content_length = int(llm_config.get('max_content_length', 380000))
         self.max_llm_concurrency = 3  # 并发模型数量限制
+
+        # 获取评分配置
+        self.scoring_config = config.get_scoring_config()
 
         analysis_config = config.get_analysis_config()
         context_mode = (analysis_config.get('interpretation_mode') if analysis_config else 'light') or 'light'
@@ -815,38 +819,76 @@ class IntelligenceReportGenerator:
 
         return enhanced_content
 
-    async def generate_intelligence_report(self, hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+    def _fetch_and_score_posts(self, start_time: datetime, end_time: datetime, limit: int, candidate_multiplier: Optional[float] = None) -> List[Dict[str, Any]]:
+        """获取并根据价值分筛选帖子"""
+        # 确定候选池大小
+        if candidate_multiplier is None:
+            candidate_multiplier = self.scoring_config.get('candidate_multiplier', 3)
+
+        candidate_limit = int(limit * candidate_multiplier)
+
+        logger.info(f"正在获取候选帖子池 (limit={limit}, multiplier={candidate_multiplier}, candidate_limit={candidate_limit})")
+
+        # 获取更大的候选池
+        candidate_posts = self.db_manager.get_enriched_posts_for_report(
+            start_time,
+            end_time,
+            candidate_limit,
+            context_mode=self.context_mode,
+            exclude_tags=self.exclude_tags
+        )
+
+        if not candidate_posts:
+            logger.warning("候选池为空")
+            return []
+
+        logger.info(f"获取到 {len(candidate_posts)} 条候选帖子，开始计算价值分...")
+
+        # 计算价值分
+        for post in candidate_posts:
+            post['value_score'] = calculate_value_score(post, self.scoring_config)
+
+        # 排序: 优先按价值分降序，次优先按发布时间降序 (Tie-breaker)
+        candidate_posts.sort(key=lambda p: (p.get('value_score', 0), p.get('published_at')), reverse=True)
+
+        # 截取 Top N
+        final_posts = candidate_posts[:limit]
+
+        # 记录一下最高分和最低分以便调试
+        if final_posts:
+            highest = final_posts[0].get('value_score')
+            lowest = final_posts[-1].get('value_score')
+            logger.info(f"筛选完成: {len(final_posts)} 条。最高分: {highest}, 最低入选分: {lowest}")
+
+        return final_posts
+
+    async def generate_intelligence_report(self, hours: int = 24, limit: int = 300, candidate_multiplier: Optional[float] = None) -> Dict[str, Any]:
         """
         生成情报分析报告，支持多模型并行生成
 
         Args:
             hours: 时间范围（小时）
             limit: 最大帖子数量
+            candidate_multiplier: 候选池倍数
 
         Returns:
             生成结果
         """
-        self._log_task_start("情报报告生成", hours=hours, limit=limit)
+        self._log_task_start("情报报告生成", hours=hours, limit=limit, multiplier=candidate_multiplier)
 
         try:
             # 计算时间范围
             end_time = datetime.now()
             start_time = end_time - timedelta(hours=hours)
 
-            # 获取富化后的帖子数据
-            enriched_posts = self.db_manager.get_enriched_posts_for_report(
-                start_time,
-                end_time,
-                limit,
-                context_mode=self.context_mode,
-                exclude_tags=self.exclude_tags
-            )
+            # 获取并筛选帖子
+            enriched_posts = self._fetch_and_score_posts(start_time, end_time, limit, candidate_multiplier)
 
             if not enriched_posts:
-                logger.warning(f"在指定时间范围内没有找到富化的帖子数据")
+                logger.warning(f"在指定时间范围内没有找到符合条件的帖子数据")
                 return self._create_error_response('没有可用的帖子数据')
 
-            logger.info(f"获取到 {len(enriched_posts)} 条富化帖子数据，context_mode={self.context_mode}")
+            logger.info(f"筛选出 {len(enriched_posts)} 条高价值帖子数据用于报告生成")
 
             # 格式化上下文
             formatted_context, sources = self.format_enriched_posts_for_smart_llm(enriched_posts)
@@ -953,38 +995,33 @@ class IntelligenceReportGenerator:
             logger.error(f"生成情报报告时发生异常: {e}", exc_info=True)
             return self._create_error_response(f'生成异常: {str(e)}')
 
-    async def generate_light_reports(self, hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+    async def generate_light_reports(self, hours: int = 24, limit: int = 300, candidate_multiplier: Optional[float] = None) -> Dict[str, Any]:
         """
         生成日报资讯（Light Reports）- 多模型并行生成
 
         Args:
             hours: 时间范围（小时）
             limit: 最大帖子数量
+            candidate_multiplier: 候选池倍数
 
         Returns:
             生成结果
         """
-        self._log_task_start("日报资讯生成", hours=hours, limit=limit)
+        self._log_task_start("日报资讯生成", hours=hours, limit=limit, multiplier=candidate_multiplier)
 
         try:
             # 计算时间范围
             end_time = datetime.now()
             start_time = end_time - timedelta(hours=hours)
 
-            # 获取富化后的帖子数据
-            enriched_posts = self.db_manager.get_enriched_posts_for_report(
-                start_time,
-                end_time,
-                limit,
-                context_mode=self.context_mode,
-                exclude_tags=self.exclude_tags
-            )
+            # 获取并筛选帖子
+            enriched_posts = self._fetch_and_score_posts(start_time, end_time, limit, candidate_multiplier)
 
             if not enriched_posts:
-                logger.warning(f"在指定时间范围内没有找到富化的帖子数据")
+                logger.warning(f"在指定时间范围内没有找到符合条件的帖子数据")
                 return self._create_error_response('没有可用的帖子数据')
 
-            logger.info(f"获取到 {len(enriched_posts)} 条富化帖子数据，开始生成日报资讯")
+            logger.info(f"筛选出 {len(enriched_posts)} 条高价值帖子数据，开始生成日报资讯")
 
             # 格式化上下文
             formatted_context, sources = self.format_enriched_posts_for_smart_llm(enriched_posts)
@@ -1250,38 +1287,33 @@ class IntelligenceReportGenerator:
 
         return model_report
 
-    async def generate_deep_report(self, hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+    async def generate_deep_report(self, hours: int = 24, limit: int = 300, candidate_multiplier: Optional[float] = None) -> Dict[str, Any]:
         """
         生成深度报告（Deep Report）- 多模型并行生成
 
         Args:
             hours: 时间范围（小时）
             limit: 最大帖子数量
+            candidate_multiplier: 候选池倍数
 
         Returns:
             生成结果
         """
-        self._log_task_start("深度报告生成", hours=hours, limit=limit)
+        self._log_task_start("深度报告生成", hours=hours, limit=limit, multiplier=candidate_multiplier)
 
         try:
             # 计算时间范围
             end_time = datetime.now()
             start_time = end_time - timedelta(hours=hours)
 
-            # 获取富化后的帖子数据
-            enriched_posts = self.db_manager.get_enriched_posts_for_report(
-                start_time,
-                end_time,
-                limit,
-                context_mode=self.context_mode,
-                exclude_tags=self.exclude_tags
-            )
+            # 获取并筛选帖子
+            enriched_posts = self._fetch_and_score_posts(start_time, end_time, limit, candidate_multiplier)
 
             if not enriched_posts:
-                logger.warning(f"在指定时间范围内没有找到富化的帖子数据")
+                logger.warning(f"在指定时间范围内没有找到符合条件的帖子数据")
                 return self._create_error_response('没有可用的帖子数据')
 
-            logger.info(f"获取到 {len(enriched_posts)} 条富化帖子数据，开始生成深度报告")
+            logger.info(f"筛选出 {len(enriched_posts)} 条高价值帖子数据，开始生成深度报告")
 
             # 格式化上下文
             formatted_context, sources = self.format_enriched_posts_for_smart_llm(enriched_posts)
@@ -1551,7 +1583,7 @@ class IntelligenceReportGenerator:
 
         return model_report
 
-    async def run_dual_report_generation(self, hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+    async def run_dual_report_generation(self, hours: int = 24, limit: int = 300, candidate_multiplier: Optional[float] = None) -> Dict[str, Any]:
         """
         运行双轨制报告生成流程
         先生成所有日报资讯，再生成深度报告
@@ -1559,11 +1591,12 @@ class IntelligenceReportGenerator:
         Args:
             hours: 时间范围（小时）
             limit: 最大帖子数量
+            candidate_multiplier: 候选池倍数
 
         Returns:
             综合结果
         """
-        logger.info(f"开始执行双轨制报告生成流程: hours={hours}, limit={limit}")
+        logger.info(f"开始执行双轨制报告生成流程: hours={hours}, limit={limit}, multiplier={candidate_multiplier}")
 
         dual_results = {
             'success': True,
@@ -1573,7 +1606,7 @@ class IntelligenceReportGenerator:
 
         # 第一步: 生成日报资讯
         logger.info("=== 第一步: 生成日报资讯 ===")
-        light_result = await self.generate_light_reports(hours, limit)
+        light_result = await self.generate_light_reports(hours, limit, candidate_multiplier)
         dual_results['light_reports'] = light_result
 
         if not light_result.get('success'):
@@ -1584,7 +1617,7 @@ class IntelligenceReportGenerator:
 
         # 第二步: 生成深度报告
         logger.info("=== 第二步: 生成深度报告 ===")
-        deep_result = await self.generate_deep_report(hours, limit)
+        deep_result = await self.generate_deep_report(hours, limit, candidate_multiplier)
         dual_results['deep_report'] = deep_result
 
         if not deep_result.get('success'):
@@ -1749,64 +1782,68 @@ class IntelligenceReportGenerator:
 [总结内容...]"""
 
 
-def run_daily_intelligence_report(hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+def run_daily_intelligence_report(hours: int = 24, limit: int = 300, candidate_multiplier: Optional[float] = None) -> Dict[str, Any]:
     """
     便捷函数：运行日度情报报告生成（保留兼容性，使用原有的多模型并行方式）
 
     Args:
         hours: 时间范围（小时）
         limit: 最大帖子数量
+        candidate_multiplier: 候选池倍数
 
     Returns:
         生成结果
     """
     generator = IntelligenceReportGenerator()
-    return asyncio.run(generator.generate_intelligence_report(hours, limit))
+    return asyncio.run(generator.generate_intelligence_report(hours, limit, candidate_multiplier))
 
 
-def run_light_reports(hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+def run_light_reports(hours: int = 24, limit: int = 300, candidate_multiplier: Optional[float] = None) -> Dict[str, Any]:
     """
     便捷函数：运行日报资讯生成
 
     Args:
         hours: 时间范围（小时）
         limit: 最大帖子数量
+        candidate_multiplier: 候选池倍数
 
     Returns:
         生成结果
     """
     generator = IntelligenceReportGenerator()
-    return asyncio.run(generator.generate_light_reports(hours, limit))
+    return asyncio.run(generator.generate_light_reports(hours, limit, candidate_multiplier))
 
 
-def run_deep_report(hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+def run_deep_report(hours: int = 24, limit: int = 300, candidate_multiplier: Optional[float] = None) -> Dict[str, Any]:
     """
     便捷函数：运行深度报告生成
 
     Args:
         hours: 时间范围（小时）
         limit: 最大帖子数量
+        candidate_multiplier: 候选池倍数
 
     Returns:
         生成结果
     """
     generator = IntelligenceReportGenerator()
-    return asyncio.run(generator.generate_deep_report(hours, limit))
+    return asyncio.run(generator.generate_deep_report(hours, limit, candidate_multiplier))
 
 
-def run_dual_reports(hours: int = 24, limit: int = 300) -> Dict[str, Any]:
+def run_dual_reports(hours: int = 24, limit: int = 300, candidate_multiplier: Optional[float] = None) -> Dict[str, Any]:
     """
     便捷函数：运行双轨制报告生成（先日报资讯，后深度报告）
 
     Args:
         hours: 时间范围（小时）
         limit: 最大帖子数量
+        candidate_multiplier: 候选池倍数
 
     Returns:
         生成结果
     """
     generator = IntelligenceReportGenerator()
-    return asyncio.run(generator.run_dual_report_generation(hours, limit))
+    return asyncio.run(generator.run_dual_report_generation(hours, limit, candidate_multiplier))
 
 
 def run_kol_report(user_id: int, days: int = 30) -> Dict[str, Any]:
