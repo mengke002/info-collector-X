@@ -116,7 +116,7 @@ jobs:
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then \
           python3.12 main.py --task intelligence_report --hours ${{ github.event.inputs.hours }} --report-limit ${{ github.event.inputs.report_limit }} --flow ${{ github.event.inputs.report_flow || 'dual' }}; \
         else \
-          python3.12 main.py --task intelligence_report --hours 24 --report-limit 200 --flow dual; \
+          python3.12 main.py --task intelligence_report --hours 24 --report-limit 180 --flow dual; \
         fi
 
   kol_report:

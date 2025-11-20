@@ -311,7 +311,7 @@ class Config:
             tag_scores = default_tag_scores
 
         return {
-            'candidate_multiplier': self._get_config_value('scoring', 'candidate_multiplier', 'SCORING_CANDIDATE_MULTIPLIER', 3, int),
+            'candidate_multiplier': self._get_config_value('scoring', 'candidate_multiplier', 'SCORING_CANDIDATE_MULTIPLIER', 2, int),
             'base_score': self._get_config_value('scoring', 'base_score', 'SCORING_BASE_SCORE', 1.0, float),
             'post_length_weight': self._get_config_value('scoring', 'post_length_weight', 'SCORING_POST_LENGTH_WEIGHT', 0.01, float),
             'interpretation_length_weight': self._get_config_value('scoring', 'interpretation_length_weight', 'SCORING_INTERPRETATION_LENGTH_WEIGHT', 0.01, float),
