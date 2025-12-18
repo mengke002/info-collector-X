@@ -3,6 +3,7 @@
 支持环境变量 > config.ini > 默认值的优先级机制
 """
 import os
+import ssl
 import configparser
 import logging
 from typing import Dict, Any, List
@@ -132,8 +133,11 @@ class Config:
             if not ca_path:
                 raise ValueError("未找到可用的 CA 证书路径，请通过 DB_SSL_CA 指定，例如 /etc/ssl/certs/ca-certificates.crt")
 
-            ssl_config: Dict[str, Any] = {'ca': ca_path}
-            config['ssl'] = ssl_config
+            ssl_context = ssl.create_default_context(cafile=ca_path)
+            # 明确要求证书校验
+            ssl_context.check_hostname = True
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+            config['ssl'] = ssl_context
 
         # 校验必填
         required = ['host', 'user', 'database', 'password']
