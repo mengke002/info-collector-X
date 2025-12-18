@@ -129,11 +129,10 @@ class Config:
             ]
             ca_path = next((p for p in ca_candidates if p and os.path.exists(p)), None)
 
-            ssl_config: Dict[str, Any] = {}
-            if ca_path:
-                ssl_config['ca'] = ca_path
+            if not ca_path:
+                raise ValueError("未找到可用的 CA 证书路径，请通过 DB_SSL_CA 指定，例如 /etc/ssl/certs/ca-certificates.crt")
 
-            # 即便未找到 ca，也传递空 dict 以开启 TLS 握手（PyMySQL 会使用默认上下文）
+            ssl_config: Dict[str, Any] = {'ca': ca_path}
             config['ssl'] = ssl_config
 
         # 校验必填
