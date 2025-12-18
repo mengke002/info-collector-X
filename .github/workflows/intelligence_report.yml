@@ -79,6 +79,7 @@ jobs:
       DB_PASSWORD: ${{ secrets.DB_PASSWORD || secrets.MYSQL_PASSWORD }}
       MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD || secrets.DB_PASSWORD }}
       DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+      DB_SSL_CA: ${{ secrets.DB_SSL_CA }}
       # LLM配置 - 支持多模型并行
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}

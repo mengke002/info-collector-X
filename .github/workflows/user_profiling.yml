@@ -25,6 +25,8 @@ jobs:
 
     - name: 执行用户画像更新任务
       env:
+        DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+        DB_SSL_CA: ${{ secrets.DB_SSL_CA }}
         DB_HOST: ${{ secrets.DB_HOST }}
         DB_PORT: ${{ secrets.DB_PORT }}
         DB_NAME: ${{ secrets.DB_NAME }}

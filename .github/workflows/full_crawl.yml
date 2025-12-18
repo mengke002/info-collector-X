@@ -38,6 +38,8 @@ jobs:
     - name: 执行全量爬取任务
       env:
         # 数据库（优先使用 DB_*，向后兼容 MYSQL_PASSWORD）
+        DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+        DB_SSL_CA: ${{ secrets.DB_SSL_CA }}
         DB_HOST: ${{ secrets.DB_HOST }}
         DB_PORT: ${{ secrets.DB_PORT }}
         DB_NAME: ${{ secrets.DB_NAME }}
