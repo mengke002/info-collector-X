@@ -118,8 +118,23 @@ class Config:
 
         # SSL 配置
         ssl_mode = self._get_config_value('database', 'ssl_mode', 'DB_SSL_MODE', 'disabled')
-        if isinstance(ssl_mode, str) and ssl_mode.upper() == 'REQUIRED':
-            config['ssl'] = {'mode': 'REQUIRED'}
+        if isinstance(ssl_mode, str) and ssl_mode.upper() != 'DISABLED':
+            # TiDB Cloud Serverless 要求 TLS；PyMySQL 需要传递 ca 证书路径而不是 ssl-mode 字符串
+            ca_from_env = self._get_config_value('database', 'ssl_ca', 'DB_SSL_CA', None)
+            ca_candidates = [
+                ca_from_env,
+                '/etc/ssl/certs/ca-certificates.crt',  # Ubuntu/GitHub Actions 常用路径
+                '/etc/ssl/cert.pem',                   # macOS 通用路径
+                '/etc/pki/tls/certs/ca-bundle.crt',    # CentOS/RHEL
+            ]
+            ca_path = next((p for p in ca_candidates if p and os.path.exists(p)), None)
+
+            ssl_config: Dict[str, Any] = {}
+            if ca_path:
+                ssl_config['ca'] = ca_path
+
+            # 即便未找到 ca，也传递空 dict 以开启 TLS 握手（PyMySQL 会使用默认上下文）
+            config['ssl'] = ssl_config
 
         # 校验必填
         required = ['host', 'user', 'database', 'password']
