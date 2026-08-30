@@ -124,7 +124,8 @@ def main():
     elif args.task == 'post_insights':
         result = run_post_insights_task(hours_back=args.hours_back, batch_size=args.batch_size)
     elif args.task == 'weekly_archive':
-        result = run_weekly_archive_task(report_retention_days=args.days, dry_run=args.dry_run)
+        retention_days = args.days if '--days' in sys.argv else 90
+        result = run_weekly_archive_task(report_retention_days=retention_days, dry_run=args.dry_run)
     else:
         print(f"未知任务类型: {args.task}")
         sys.exit(1)

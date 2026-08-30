@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       report_retention_days:
-        description: '主库保留情报报告天数（超过此天数的报告迁移至备库归档并从主库释放）'
+        description: '主库保留情报报告天数（默认: 90 天 / 3 个月，超期报告迁移至备库归档并从主库释放）'
         required: false
-        default: '30'
+        default: '90'
         type: string
       dry_run:
         description: '是否仅预演（不实际修改数据库）'
@@ -55,7 +55,7 @@ jobs:
           DRY_RUN_FLAG="--dry-run"
         fi
         
-        REPORT_DAYS="${{ github.event.inputs.report_retention_days || '30' }}"
+        REPORT_DAYS="${{ github.event.inputs.report_retention_days || '90' }}"
         
         python3.12 main.py --task weekly_archive --days $REPORT_DAYS $DRY_RUN_FLAG
 

@@ -648,11 +648,11 @@ def test_crawler_connection() -> Dict[str, Any]:
         }
 
 
-def run_weekly_archive_task(report_retention_days: int = 30, dry_run: bool = False) -> Dict[str, Any]:
+def run_weekly_archive_task(report_retention_days: int = 90, dry_run: bool = False) -> Dict[str, Any]:
     """执行每周数据归档与主备 TiDB 同步任务 (Scheme A)
 
     Args:
-        report_retention_days: 主库保留情报报告天数 (默认 30 天)
+        report_retention_days: 主库保留情报报告天数 (默认 90 天 / 3 个月)
         dry_run: 是否仅预演
 
     Returns:

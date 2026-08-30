@@ -175,11 +175,11 @@ class WeeklyArchiveMigrator:
         logger.info(f"用户元数据同步完成: 用户 {synced_users} 人, 画像 {synced_profiles} 条")
         return synced_users, synced_profiles
 
-    def migrate_intelligence_reports(self, retention_days: int = 30, batch_size: int = 200, dry_run: bool = False) -> Tuple[int, int]:
+    def migrate_intelligence_reports(self, retention_days: int = 90, batch_size: int = 200, dry_run: bool = False) -> Tuple[int, int]:
         """
         流式迁移历史情报报告：
         - 超过 retention_days 天的历史报告分批写入备用库永久存档；
-        - 从主库清理已迁移的历史报告，释放主库空间（主库仅保留近 30 天报告）。
+        - 从主库清理已迁移的历史报告，释放主库空间（主库滚动保留最近 3 个月 / 90 天报告）。
         """
         cutoff_date = datetime.now() - timedelta(days=retention_days)
         logger.info(f"正在查询创建时间早于 {cutoff_date.strftime('%Y-%m-%d %H:%M:%S')} (超过 {retention_days} 天) 的历史报告...")
