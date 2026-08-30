@@ -648,3 +648,65 @@ def test_crawler_connection() -> Dict[str, Any]:
         }
 
 
+def run_weekly_archive_task(report_retention_days: int = 30, dry_run: bool = False) -> Dict[str, Any]:
+    """执行每周数据归档与主备 TiDB 同步任务 (Scheme A)
+
+    Args:
+        report_retention_days: 主库保留情报报告天数 (默认 30 天)
+        dry_run: 是否仅预演
+
+    Returns:
+        任务执行结果字典
+    """
+    import time
+    start_time = time.time()
+    logger.info("=== 启动每周数据归档与备库同步任务 (Scheme A) ===")
+
+    try:
+        from .archive_migrator import WeeklyArchiveMigrator
+
+        migrator = WeeklyArchiveMigrator()
+
+        # 1. 确保备库表结构存在
+        migrator.init_backup_database()
+
+        # 2. 同步用户和画像
+        users_synced, profiles_synced = 0, 0
+        if not dry_run:
+            users_synced, profiles_synced = migrator.sync_users_and_profiles()
+
+        # 3. 迁移超期历史报告 (>30天)
+        rep_migrated, rep_deleted = migrator.migrate_intelligence_reports(
+            retention_days=report_retention_days,
+            dry_run=dry_run
+        )
+
+        # 4. 增量镜像推文和洞察 (主库 100% 完整保留)
+        posts_mirrored = migrator.mirror_posts_and_insights(dry_run=dry_run)
+
+        elapsed = round(time.time() - start_time, 2)
+        logger.info(f"每周归档同步完成，耗时 {elapsed} 秒")
+
+        return {
+            'success': True,
+            'dry_run': dry_run,
+            'report_retention_days': report_retention_days,
+            'reports_migrated': rep_migrated,
+            'reports_deleted_from_primary': rep_deleted,
+            'posts_mirrored': posts_mirrored,
+            'users_synced': users_synced,
+            'profiles_synced': profiles_synced,
+            'elapsed_seconds': elapsed,
+            'message': f"归档同步成功 (报告迁移: {rep_migrated}, 释放主库: {rep_deleted}, 推文镜像: {posts_mirrored})"
+        }
+
+    except Exception as e:
+        logger.error(f"每周归档任务执行失败: {e}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e),
+            'elapsed_seconds': round(time.time() - start_time, 2)
+        }
+
+
+

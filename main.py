@@ -15,7 +15,7 @@ from src.config import config
 from src.tasks import (run_crawl_task, run_full_crawl_task, run_user_profiling_task, run_scavenger_task,
                       run_user_profiling_analysis_task,
                       run_intelligence_report_task, run_kol_report_task, run_full_analysis_pipeline,
-                      run_post_insights_task)
+                      run_post_insights_task, run_weekly_archive_task)
 
 
 def get_utc_time():
@@ -28,9 +28,12 @@ def main():
     parser = argparse.ArgumentParser(description='X/Twitter 信息收集与分析系统')
     parser.add_argument('--task',
                        choices=['high_freq', 'medium_freq', 'low_freq', 'full_crawl', 'user_profiling', 'scavenger',
-                               'user_analysis', 'intelligence_report', 'kol_report', 'full_analysis', 'post_insights'],
+                               'user_analysis', 'intelligence_report', 'kol_report', 'full_analysis', 'post_insights',
+                               'weekly_archive'],
                        default='high_freq',
                        help='要执行的任务类型')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='预演模式（不实际修改数据库）')
     parser.add_argument('--output', choices=['json', 'text'], default='text',
                        help='输出格式')
     parser.add_argument('--recreate-db', action='store_true',
@@ -120,6 +123,8 @@ def main():
         )
     elif args.task == 'post_insights':
         result = run_post_insights_task(hours_back=args.hours_back, batch_size=args.batch_size)
+    elif args.task == 'weekly_archive':
+        result = run_weekly_archive_task(report_retention_days=args.days, dry_run=args.dry_run)
     else:
         print(f"未知任务类型: {args.task}")
         sys.exit(1)

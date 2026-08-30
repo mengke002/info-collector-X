@@ -1,0 +1,62 @@
+name: 数据维护-每周数据归档与备库同步
+
+on:
+  schedule:
+    # 每周日 UTC 19:00 执行（北京时间周一凌晨 03:00，处于休眠窗口期，零业务干扰）
+    - cron: '0 19 * * 0'
+  workflow_dispatch:
+    inputs:
+      report_retention_days:
+        description: '主库保留情报报告天数（超过此天数的报告迁移至备库归档并从主库释放）'
+        required: false
+        default: '30'
+        type: string
+      dry_run:
+        description: '是否仅预演（不实际修改数据库）'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  weekly_archive:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 执行主备库数据归档与镜像同步任务 (Scheme A)
+      env:
+        # 主库配置
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_PORT: ${{ secrets.DB_PORT }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD || secrets.MYSQL_PASSWORD }}
+        MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD || secrets.DB_PASSWORD }}
+        DB_SSL_MODE: ${{ secrets.DB_SSL_MODE || 'REQUIRED' }}
+        DB_SSL_CA: ${{ secrets.DB_SSL_CA }}
+        # 备用/归档库配置 (支持完整 URI 串)
+        BACKUP_DB_URL: ${{ secrets.BACKUP_DB_URL }}
+        BACKUP_DB_SSL_MODE: ${{ secrets.BACKUP_DB_SSL_MODE || 'REQUIRED' }}
+      run: |
+        DRY_RUN_FLAG=""
+        if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          DRY_RUN_FLAG="--dry-run"
+        fi
+        
+        REPORT_DAYS="${{ github.event.inputs.report_retention_days || '30' }}"
+        
+        python3.12 main.py --task weekly_archive --days $REPORT_DAYS $DRY_RUN_FLAG
+
+

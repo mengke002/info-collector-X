@@ -147,6 +147,70 @@ class Config:
 
         return config
 
+    def get_backup_database_config(self) -> Dict[str, Any]:
+        """获取备用/归档数据库配置（支持 URI 串或单独配置，环境变量 > config.ini > 默认值）。"""
+        import urllib.parse
+
+        # 优先读取完整 URI (环境变量 BACKUP_DB_URL 或 config.ini [backup_database] url)
+        db_url = self._get_config_value('backup_database', 'url', 'BACKUP_DB_URL', None)
+        
+        host, user, password, database, port = None, None, None, None, 4000
+        if db_url:
+            parsed = urllib.parse.urlparse(db_url)
+            host = parsed.hostname
+            port = parsed.port or 4000
+            user = urllib.parse.unquote(parsed.username) if parsed.username else None
+            password = urllib.parse.unquote(parsed.password) if parsed.password else None
+            path_db = parsed.path.lstrip('/') if parsed.path else ''
+            # 如果指定为 sys 系统库，自动使用可写的 test 库
+            database = 'test' if (not path_db or path_db.lower() == 'sys') else path_db
+
+        # 环境变量单独覆盖
+        host = os.getenv('BACKUP_DB_HOST', host)
+        user = os.getenv('BACKUP_DB_USER', user)
+        password = os.getenv('BACKUP_DB_PASSWORD', password)
+        database = os.getenv('BACKUP_DB_NAME', database)
+        if os.getenv('BACKUP_DB_PORT'):
+            try:
+                port = int(os.getenv('BACKUP_DB_PORT'))
+            except (ValueError, TypeError):
+                pass
+
+        if not host or not user or not password:
+            raise ValueError("备用数据库核心配置缺失，请在 config.ini [backup_database] 或环境变量 BACKUP_DB_URL 中配置。")
+
+        config = {
+            'host': host,
+            'user': user,
+            'password': password,
+            'database': database or 'test',
+            'port': port,
+            'charset': 'utf8mb4',
+            'autocommit': True,
+        }
+
+        # SSL 配置 (TiDB Cloud 必需)
+        ssl_mode = self._get_config_value('backup_database', 'ssl_mode', 'BACKUP_DB_SSL_MODE', 'REQUIRED')
+        if isinstance(ssl_mode, str) and ssl_mode.upper() != 'DISABLED':
+            ca_from_env = self._get_config_value('backup_database', 'ssl_ca', 'BACKUP_DB_SSL_CA', os.getenv('DB_SSL_CA'))
+            ca_candidates = [
+                ca_from_env,
+                '/etc/ssl/certs/ca-certificates.crt',
+                '/etc/ssl/cert.pem',
+                '/etc/pki/tls/certs/ca-bundle.crt',
+            ]
+            ca_path = next((p for p in ca_candidates if p and os.path.exists(p)), None)
+            if ca_path:
+                ssl_context = ssl.create_default_context(cafile=ca_path)
+                ssl_context.check_hostname = True
+                ssl_context.verify_mode = ssl.CERT_REQUIRED
+                config['ssl'] = ssl_context
+            else:
+                # 兼容本地开发环境默认上下文
+                config['ssl'] = {'ssl_mode': 'REQUIRED'}
+
+        return config
+
     def get_crawler_config(self) -> Dict[str, Any]:
         """获取爬虫配置（环境变量 > config.ini > 默认值）。"""
         return {
