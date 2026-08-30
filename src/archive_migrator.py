@@ -207,7 +207,6 @@ class WeeklyArchiveMigrator:
         migrated_count = 0
         deleted_count = 0
 
-        # 每次拉取 200 条，避免内存膨胀
         fetch_batch_sql = """
             SELECT id, report_type, report_title, report_content, time_range_start, time_range_end, related_user_id, created_at
             FROM intelligence_reports
@@ -216,18 +215,16 @@ class WeeklyArchiveMigrator:
             LIMIT %s
         """
 
-        while True:
-            with self.get_primary_connection() as p_conn:
-                with p_conn.cursor(pymysql.cursors.DictCursor) as p_cur:
+        # 保持连接持久复用，消除循环内反复 TLS 握手开销
+        with self.get_primary_connection() as p_conn, self.get_backup_connection() as b_conn:
+            with p_conn.cursor(pymysql.cursors.DictCursor) as p_cur, b_conn.cursor() as b_cur:
+                while True:
                     p_cur.execute(fetch_batch_sql, (cutoff_date, batch_size))
                     batch = p_cur.fetchall()
 
-            if not batch:
-                break
+                    if not batch:
+                        break
 
-            # 写入备用库
-            with self.get_backup_connection() as b_conn:
-                with b_conn.cursor() as b_cur:
                     values = [
                         (r['id'], r['report_type'], r['report_title'], r['report_content'],
                          r['time_range_start'], r['time_range_end'], r['related_user_id'], r['created_at'])
@@ -236,18 +233,16 @@ class WeeklyArchiveMigrator:
                     b_cur.executemany(insert_sql, values)
                     b_conn.commit()
 
-            batch_ids = [r['id'] for r in batch]
-            migrated_count += len(batch_ids)
+                    batch_ids = [r['id'] for r in batch]
+                    migrated_count += len(batch_ids)
 
-            # 从主库清理已成功写入的批次
-            with self.get_primary_connection() as p_conn:
-                with p_conn.cursor() as p_cur:
+                    # 从主库清理已成功写入的批次
                     fmt = ','.join(['%s'] * len(batch_ids))
                     p_cur.execute(f"DELETE FROM intelligence_reports WHERE id IN ({fmt})", tuple(batch_ids))
                     p_conn.commit()
                     deleted_count += p_cur.rowcount
 
-            logger.info(f"  -> 已迁移并清理报告进度: {migrated_count}/{total_old} 篇...")
+                    logger.info(f"  -> 已迁移并清理报告进度: {migrated_count}/{total_old} 篇...")
 
         logger.info(f"✅ 成功完成 {migrated_count} 篇历史报告的归档与主库空间释放！")
         return migrated_count, deleted_count
@@ -279,7 +274,7 @@ class WeeklyArchiveMigrator:
         if total_new_posts == 0 or dry_run:
             return total_new_posts
 
-        # 3. 流式分块同步
+        # 3. 流式分块同步 (连接持久复用)
         insert_posts_sql = """
             INSERT IGNORE INTO twitter_posts
             (id, user_table_id, post_url, post_content, post_type, media_urls, published_at, created_at)
@@ -294,33 +289,28 @@ class WeeklyArchiveMigrator:
         current_id_cursor = max_backup_id
         synced_total = 0
 
-        while True:
-            # 读取推文块
-            with self.get_primary_connection() as p_conn:
-                with p_conn.cursor(pymysql.cursors.DictCursor) as p_cur:
+        with self.get_primary_connection() as p_conn, self.get_backup_connection() as b_conn:
+            with p_conn.cursor(pymysql.cursors.DictCursor) as p_cur, b_conn.cursor() as b_cur:
+                while True:
+                    # 读取推文块
                     p_cur.execute(
                         "SELECT * FROM twitter_posts WHERE id > %s ORDER BY id ASC LIMIT %s",
                         (current_id_cursor, chunk_size)
                     )
                     posts_chunk = p_cur.fetchall()
 
-            if not posts_chunk:
-                break
+                    if not posts_chunk:
+                        break
 
-            post_ids = [p['id'] for p in posts_chunk]
-            current_id_cursor = post_ids[-1]
+                    post_ids = [p['id'] for p in posts_chunk]
+                    current_id_cursor = post_ids[-1]
 
-            # 读取匹配的 post_insights
-            insights_chunk = []
-            with self.get_primary_connection() as p_conn:
-                with p_conn.cursor(pymysql.cursors.DictCursor) as p_cur:
+                    # 读取匹配的 post_insights
                     fmt = ','.join(['%s'] * len(post_ids))
                     p_cur.execute(f"SELECT * FROM post_insights WHERE post_id IN ({fmt})", tuple(post_ids))
                     insights_chunk = p_cur.fetchall()
 
-            # 批量写入备用库
-            with self.get_backup_connection() as b_conn:
-                with b_conn.cursor() as b_cur:
+                    # 批量写入备用库
                     p_vals = [
                         (p['id'], p['user_table_id'], p['post_url'], p['post_content'],
                          p['post_type'], p['media_urls'], p['published_at'], p['created_at'])
@@ -339,8 +329,8 @@ class WeeklyArchiveMigrator:
 
                     b_conn.commit()
 
-            synced_total += len(posts_chunk)
-            logger.info(f"  -> 已增量同步推文进度: {synced_total}/{total_new_posts} 条...")
+                    synced_total += len(posts_chunk)
+                    logger.info(f"  -> 已增量同步推文进度: {synced_total}/{total_new_posts} 条...")
 
         logger.info(f"✅ 成功完成 {synced_total} 条推文及关联洞察的增量镜像备份！")
         return synced_total
