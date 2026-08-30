@@ -94,6 +94,14 @@ class IntelligenceReportGenerator:
         """获取北京时间"""
         return datetime.now(timezone.utc) + timedelta(hours=8)
 
+    def _to_bj_time(self, dt: Optional[datetime]) -> Optional[datetime]:
+        """将 UTC datetime 转换为北京时间"""
+        if dt is None:
+            return None
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone(timedelta(hours=8)))
+        return dt + timedelta(hours=8)
+
     def _get_report_models(self) -> List[str]:
         """获取用于生成报告的模型列表"""
         if not self.llm_client:
@@ -612,12 +620,14 @@ class IntelligenceReportGenerator:
 
         # 为LLM生成的报告添加标准头部信息
         beijing_time = self._bj_time()
+        start_bj = self._to_bj_time(start_time)
+        end_bj = self._to_bj_time(end_time)
         header_info = [
             f"# 📊 X/Twitter 技术情报日报 - {display_name}",
             "",
             f"*报告生成时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
             "",
-            f"*数据范围: {start_time.strftime('%Y-%m-%d %H:%M:%S')} - {end_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
+            f"*数据范围: {start_bj.strftime('%Y-%m-%d %H:%M:%S')} - {end_bj.strftime('%Y-%m-%d %H:%M:%S')}*  ",
             "",
             f"*分析动态数: {len(enriched_posts)} 条*",
             "",
@@ -650,7 +660,7 @@ class IntelligenceReportGenerator:
         # 应用来源链接增强后处理
         report_content = self._enhance_source_links(report_content, sources)
 
-        title = f"X/Twitter 技术情报日报 - {display_name} - {end_time.strftime('%Y-%m-%d %H:%M')}"
+        title = f"X/Twitter 技术情报日报 - {display_name} - {end_bj.strftime('%Y-%m-%d %H:%M')}"
 
         # 保存报告到数据库
         try:
@@ -877,8 +887,8 @@ class IntelligenceReportGenerator:
         self._log_task_start("情报报告生成", hours=hours, limit=limit, multiplier=candidate_multiplier)
 
         try:
-            # 计算时间范围
-            end_time = datetime.now()
+            # 计算时间范围（统一以 UTC 基准查询数据库）
+            end_time = datetime.now(timezone.utc).replace(tzinfo=None)
             start_time = end_time - timedelta(hours=hours)
 
             # 获取并筛选帖子
@@ -980,7 +990,9 @@ class IntelligenceReportGenerator:
                 result['report_title'] = primary_report['report_title']
                 result['report_content'] = primary_report['report_content']
                 result['notion_push'] = primary_report.get('notion_push')
-                result['time_range'] = f"{start_time.strftime('%Y-%m-%d %H:%M')} - {end_time.strftime('%Y-%m-%d %H:%M')}"
+                start_bj = self._to_bj_time(start_time)
+                end_bj = self._to_bj_time(end_time)
+                result['time_range'] = f"{start_bj.strftime('%Y-%m-%d %H:%M')} - {end_bj.strftime('%Y-%m-%d %H:%M')}"
 
             self._log_task_complete(
                 "情报报告生成",
@@ -1010,8 +1022,8 @@ class IntelligenceReportGenerator:
         self._log_task_start("日报资讯生成", hours=hours, limit=limit, multiplier=candidate_multiplier)
 
         try:
-            # 计算时间范围
-            end_time = datetime.now()
+            # 计算时间范围（统一以 UTC 基准查询数据库）
+            end_time = datetime.now(timezone.utc).replace(tzinfo=None)
             start_time = end_time - timedelta(hours=hours)
 
             # 获取并筛选帖子
@@ -1179,12 +1191,14 @@ class IntelligenceReportGenerator:
 
         # 为LLM生成的报告添加标准头部信息
         beijing_time = self._bj_time()
+        start_bj = self._to_bj_time(start_time)
+        end_bj = self._to_bj_time(end_time)
         header_info = [
             f"# 📰 X/Twitter 技术日报资讯 - {display_name}",
             "",
             f"*报告生成时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
             "",
-            f"*数据范围: {start_time.strftime('%Y-%m-%d %H:%M:%S')} - {end_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
+            f"*数据范围: {start_bj.strftime('%Y-%m-%d %H:%M:%S')} - {end_bj.strftime('%Y-%m-%d %H:%M:%S')}*  ",
             "",
             f"*分析动态数: {len(enriched_posts)} 条*",
             "",
@@ -1217,7 +1231,7 @@ class IntelligenceReportGenerator:
         # 应用来源链接增强
         report_content = self._enhance_source_links(report_content, sources)
 
-        title = f"X技术日报资讯 - {display_name} - {end_time.strftime('%Y-%m-%d %H:%M')}"
+        title = f"X技术日报资讯 - {display_name} - {end_bj.strftime('%Y-%m-%d %H:%M')}"
 
         # 保存报告到数据库
         try:
@@ -1302,8 +1316,8 @@ class IntelligenceReportGenerator:
         self._log_task_start("深度报告生成", hours=hours, limit=limit, multiplier=candidate_multiplier)
 
         try:
-            # 计算时间范围
-            end_time = datetime.now()
+            # 计算时间范围（统一以 UTC 基准查询数据库）
+            end_time = datetime.now(timezone.utc).replace(tzinfo=None)
             start_time = end_time - timedelta(hours=hours)
 
             # 获取并筛选帖子
@@ -1475,12 +1489,14 @@ class IntelligenceReportGenerator:
 
         # 为LLM生成的报告添加标准头部信息
         beijing_time = self._bj_time()
+        start_bj = self._to_bj_time(start_time)
+        end_bj = self._to_bj_time(end_time)
         header_info = [
             f"# 📊 X/Twitter 技术情报深度报告 - {display_name}",
             "",
             f"*报告生成时间: {beijing_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
             "",
-            f"*数据范围: {start_time.strftime('%Y-%m-%d %H:%M:%S')} - {end_time.strftime('%Y-%m-%d %H:%M:%S')}*  ",
+            f"*数据范围: {start_bj.strftime('%Y-%m-%d %H:%M:%S')} - {end_bj.strftime('%Y-%m-%d %H:%M:%S')}*  ",
             "",
             f"*分析动态数: {len(enriched_posts)} 条*",
             "",
@@ -1513,7 +1529,7 @@ class IntelligenceReportGenerator:
         # 应用来源链接增强
         report_content = self._enhance_source_links(report_content, sources)
 
-        title = f"X技术情报深度报告 - {display_name} - {end_time.strftime('%Y-%m-%d %H:%M')}"
+        title = f"X技术情报深度报告 - {display_name} - {end_bj.strftime('%Y-%m-%d %H:%M')}"
 
         # 保存报告到数据库
         try:
@@ -1695,7 +1711,7 @@ class IntelligenceReportGenerator:
                 return {'success': False, 'error': response.get('error')}
 
             report_content = response['content']
-            report_title = f"@{user_handle} 思想轨迹月度报告 - {datetime.now().strftime('%Y-%m-%d')}"
+            report_title = f"@{user_handle} 思想轨迹月度报告 - {self._bj_time().strftime('%Y-%m-%d')}"
 
             # 保存报告
             if self.db_manager.save_intelligence_report(
