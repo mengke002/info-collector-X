@@ -6,6 +6,7 @@ LLM客户端模块
 import logging
 import time
 from typing import Dict, Any, List, Optional
+import httpx
 from openai import OpenAI
 
 from .config import config
@@ -29,11 +30,26 @@ class LLMClient:
         self.smart_model = llm_config.get('smart_model_name', 'gpt-4.1')
         self.report_models = llm_config.get('report_models', [])
         self.max_tokens = llm_config.get('max_tokens', 20000)
+        self.timeout = float(llm_config.get('request_timeout', 300))
+        self.retry_delay = int(llm_config.get('retry_delay', 5))
 
         if not self.api_key:
             raise ValueError("未找到OPENAI_API_KEY配置，请在环境变量或config.ini中设置")
 
-        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        # 配置具备充足握手与读取时间的 httpx 客户端，防止反向代理在处理大 Context 首字延迟长时提前断开
+        http_client = httpx.Client(
+            timeout=httpx.Timeout(
+                timeout=self.timeout,
+                connect=30.0,
+                read=self.timeout,
+                write=60.0
+            )
+        )
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            http_client=http_client
+        )
 
         self.logger.info(f"LLM客户端初始化成功")
         self.logger.info(f"Fast Model: {self.fast_model}")
@@ -42,6 +58,7 @@ class LLMClient:
         self.logger.info(f"Smart Model: {self.smart_model}")
         self.logger.info(f"Report Models: {self.report_models}")
         self.logger.info(f"Max Tokens: {self.max_tokens}")
+        self.logger.info(f"Request Timeout: {self.timeout}s")
 
     def call_fast_model(self, prompt: str, temperature: float = 0.1, max_retries: int = 3) -> Dict[str, Any]:
         """
@@ -50,16 +67,16 @@ class LLMClient:
         """
         return self._make_request(prompt, self.fast_model, temperature, max_retries)
 
-    def call_smart_model(self, prompt: str, temperature: float = 0.5, max_retries: int = 3, model_override: Optional[str] = None) -> Dict[str, Any]:
+    def call_smart_model(self, prompt: str, temperature: float = 0.5, max_retries: int = 3, model_override: Optional[str] = None, min_content_length: int = 1) -> Dict[str, Any]:
         if model_override:
-            return self._make_request(prompt, model_override, temperature, max_retries)
+            return self._make_request(prompt, model_override, temperature, max_retries, min_content_length=min_content_length)
         
         if not self.report_models:
             # Fallback to old smart_model_name if report_models is empty
             llm_config = config.get_llm_config()
             smart_model = llm_config.get('smart_model_name')
             if smart_model:
-                return self._make_request(prompt, smart_model, temperature, max_retries)
+                return self._make_request(prompt, smart_model, temperature, max_retries, min_content_length=min_content_length)
             raise ValueError("未配置任何可用于生成报告的report_models或smart_model_name")
 
         last_response: Dict[str, Any] = {
@@ -68,7 +85,7 @@ class LLMClient:
         }
 
         for index, model_name in enumerate(self.report_models):
-            result = self._make_request(prompt, model_name, temperature, max_retries)
+            result = self._make_request(prompt, model_name, temperature, max_retries, min_content_length=min_content_length)
             if result.get('success'):
                 return result
 
@@ -250,25 +267,30 @@ class LLMClient:
                     }
 
 
-    def _make_request(self, prompt: str, model_name: str, temperature: float, max_retries: int = 3) -> Dict[str, Any]:
+    def _make_request(self, prompt: str, model_name: str, temperature: float, max_retries: int = 3, min_content_length: int = 1) -> Dict[str, Any]:
         """
-        执行具体的LLM请求，支持streaming和重试机制
+        执行具体的LLM请求，支持streaming和重试机制，以及截断检测与降级容错
 
         Args:
             prompt: 提示词
             model_name: 模型名称
             temperature: 生成温度
             max_retries: 最大重试次数
+            min_content_length: 预期最小返回字符数（防流式异常提前中断截断）
 
         Returns:
             响应结果字典
         """
         for attempt in range(max_retries):
             try:
-                self.logger.info(f"调用LLM: {model_name} (尝试 {attempt + 1}/{max_retries})")
+                self.logger.info(f"调用LLM: {model_name} (尝试 {attempt + 1}/{max_retries}, stream=True)")
                 self.logger.info(f"提示词长度: {len(prompt)} 字符")
 
-                # 创建streaming请求
+                last_finish_reason = None
+                full_content = ""
+                reasoning_content_full = ""
+
+                # 创建streaming请求（纯流式传输，保持TCP长连接活跃避免网关空闲超时）
                 response = self.client.chat.completions.create(
                     model=model_name,
                     messages=[
@@ -280,11 +302,7 @@ class LLMClient:
                     stream=True
                 )
 
-                # 收集所有streaming内容
-                full_content = ""
-                reasoning_content_full = ""
                 chunk_count = 0
-
                 self.logger.info("开始streaming响应处理...")
 
                 for chunk in response:
@@ -300,19 +318,28 @@ class LLMClient:
                             self.logger.debug(f"跳过空choices的chunk {chunk_count}")
                             continue
 
-                        delta = chunk.choices[0].delta
+                        choice = chunk.choices[0]
+                        finish_reason = getattr(choice, 'finish_reason', None)
+                        if finish_reason:
+                            last_finish_reason = finish_reason
 
-                        # 安全地获取reasoning_content和content
-                        reasoning_content = getattr(delta, 'reasoning_content', None)
+                        delta = choice.delta
+
+                        # 安全地获取reasoning_content和content（兼容reasoning_content、thought、reasoning等不同网关命名）
+                        reasoning_content = (
+                            getattr(delta, 'reasoning_content', None)
+                            or getattr(delta, 'thought', None)
+                            or getattr(delta, 'reasoning', None)
+                        )
                         content_chunk = getattr(delta, 'content', None)
 
                         if reasoning_content:
-                            # 推理内容单独收集，但不加入最终结果
+                            # 推理思考内容单独收集，绝不混入最终回答正文
                             reasoning_content_full += reasoning_content
                             self.logger.debug(f"Chunk {chunk_count} - Reasoning: {reasoning_content[:50]}...")
 
                         if content_chunk:
-                            # 只收集最终的content内容
+                            # 只收集最终实际回答的content正文
                             full_content += content_chunk
                             self.logger.debug(f"Chunk {chunk_count} - Content: {content_chunk[:50]}...")
                     except IndexError as e:
@@ -323,19 +350,47 @@ class LLMClient:
                         self.logger.debug("异常chunk详情: %r", chunk, exc_info=True)
                         continue
 
-                self.logger.info(f"LLM调用完成 - 处理了 {chunk_count} 个chunks")
-                self.logger.info(f"响应内容长度: {len(full_content)} 字符")
+                self.logger.info(
+                    f"LLM流式调用完成 - 处理了 {chunk_count} 个chunks, finish_reason: {last_finish_reason}, "
+                    f"实际回答内容: {len(full_content)} 字符, 思考推理内容: {len(reasoning_content_full)} 字符"
+                )
+
+                # 处理返回内容（严格区分：正文与思考过程分离）
+                clean_content = full_content.strip()
+
+                # 如果正文为空但有推理内容（极少数网关将回答放在思考字段中）
+                if not clean_content and reasoning_content_full.strip():
+                    self.logger.warning(f"模型 {model_name} 的正文为空，回退使用 reasoning_content ({len(reasoning_content_full)} 字符)")
+                    clean_content = reasoning_content_full.strip()
 
                 # 检查响应内容是否为空
-                if not full_content.strip():
-                    raise ValueError("LLM返回空响应")
+                if not clean_content:
+                    raise ValueError(f"LLM返回空响应 (finish_reason: {last_finish_reason})")
+
+                # 严格的截断与完整性校验：
+                # 1) finish_reason 校验：若有最小长度要求的任务，必须正常结束 (finish_reason == 'stop')
+                # 若 finish_reason 为 None（中途断流）或 'length'（达到最大 token 截断）等，坚决不予放行！
+                if min_content_length > 1 and last_finish_reason != 'stop':
+                    raise ValueError(
+                        f"模型 {model_name} 流式未正常结束 (finish_reason={last_finish_reason})，"
+                        f"当前收到 {len(clean_content)} 字符，疑似连接中断或被服务商提前截断"
+                    )
+
+                # 2) 如果设置了预期最小长度，且返回长度明显低于预期（仅按实际正文字符数判定）
+                if min_content_length > 1 and len(clean_content) < min_content_length:
+                    raise ValueError(
+                        f"模型 {model_name} 返回内容过短 ({len(clean_content)} 字符 < 最低预期 {min_content_length} 字符)，"
+                        f"finish_reason: {last_finish_reason}，内容不完整"
+                    )
 
                 return {
                     'success': True,
-                    'content': full_content.strip(),
+                    'content': clean_content,
+                    'reasoning_content': reasoning_content_full.strip(),
                     'model': model_name,
                     'provider': 'openai_compatible',
-                    'attempt': attempt + 1
+                    'attempt': attempt + 1,
+                    'finish_reason': last_finish_reason
                 }
 
             except Exception as e:
@@ -352,8 +407,8 @@ class LLMClient:
                         'total_attempts': max_retries
                     }
                 else:
-                    # 等待后重试
-                    wait_time = (attempt + 1) * 2  # 递增等待时间: 2, 4, 6秒
+                    # 等待后重试（递增等待：第1次失败等5秒，第2次失败等10秒...）
+                    wait_time = (attempt + 1) * self.retry_delay
                     self.logger.info(f"等待 {wait_time} 秒后重试...")
                     time.sleep(wait_time)
 

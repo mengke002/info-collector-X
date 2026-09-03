@@ -37,7 +37,7 @@ class IntelligenceReportGenerator:
         # 获取LLM配置
         llm_config = config.get_llm_config()
         self.max_content_length = int(llm_config.get('max_content_length', 380000))
-        self.max_llm_concurrency = 3  # 并发模型数量限制
+        self.max_llm_concurrency = max(1, int(llm_config.get('report_concurrency', 4)))  # 并发模型数量限制（默认4个全并发）
 
         # 获取评分配置
         self.scoring_config = config.get_scoring_config()
@@ -393,7 +393,7 @@ class IntelligenceReportGenerator:
 ```
 
 # Important Notes:
-1. 每个分类至少要有3-5条信息，如果某分类无内容可省略该分类。
+1. **必须完整覆盖所有分类板块**：必须按顺序输出 ## 📰 今日要闻、## 🔥 热门话题、## 💡 技术动态、## 🚀 产品发布、## 🛠️ 工具资源、## 📊 行业观察、## 🎯 精选观点 全部7个板块，严禁省略任何板块！每个分类下至少整理3-5条信息。
 2. **信息要全面**，不要遗漏有价值的内容。
 3. 每条信息必须有 `[Source: T_n]` 标注。
 4. **内容为王**: 确保每条信息的描述足够清晰、完整，能够独立成文。对于复杂或重要的动态，宁可篇幅稍长，也要说清楚来龙去脉和核心价值。
@@ -593,9 +593,17 @@ class IntelligenceReportGenerator:
 
         logger.info(f"[{display_name}] 模型线程启动，开始生成情报报告")
 
+        # 针对本次分析的帖子数自适应计算最低正文长度（180条推文时约3500字，防止半截截断）
+        min_report_length = min(3500, max(800, len(enriched_posts) * 20))
+
         # 调用LLM生成报告
         try:
-            response = self.llm_client.call_smart_model(prompt, model_override=model_name, temperature=0.4)
+            response = self.llm_client.call_smart_model(
+                prompt,
+                model_override=model_name,
+                temperature=0.4,
+                min_content_length=min_report_length
+            )
 
             if not response or not response.get('success'):
                 error_msg = f"LLM调用失败: {response.get('error') if response else 'Unknown error'}"
@@ -942,11 +950,18 @@ class IntelligenceReportGenerator:
                 )
 
             logger.info(
-                f"开始并行生成 {len(tasks)} 份情报报告: {[meta['display'] for meta in task_meta]}"
+                f"开始并行生成 {len(tasks)} 份情报报告 (并发度限制: {self.max_llm_concurrency}): {[meta['display'] for meta in task_meta]}"
             )
 
+            # 通过信号量控制模型并发数，避免多模型超长请求同时涌入造成网关断流
+            sem = asyncio.Semaphore(self.max_llm_concurrency)
+
+            async def _run_bounded_task(coro):
+                async with sem:
+                    return await coro
+
             # 并行执行所有任务
-            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+            task_results = await asyncio.gather(*[_run_bounded_task(t) for t in tasks], return_exceptions=True)
 
             # 处理任务结果
             for meta, task_result in zip(task_meta, task_results):
@@ -1072,10 +1087,17 @@ class IntelligenceReportGenerator:
                     )
                 )
 
-            logger.info(f"开始并行生成 {len(tasks)} 份日报资讯: {[meta['display'] for meta in task_meta]}")
+            logger.info(f"开始并行生成 {len(tasks)} 份日报资讯 (并发度限制: {self.max_llm_concurrency}): {[meta['display'] for meta in task_meta]}")
+
+            # 通过信号量控制模型并发数，避免多模型超长请求同时涌入造成网关断流
+            sem = asyncio.Semaphore(self.max_llm_concurrency)
+
+            async def _run_bounded_task(coro):
+                async with sem:
+                    return await coro
 
             # 并行执行所有任务
-            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+            task_results = await asyncio.gather(*[_run_bounded_task(t) for t in tasks], return_exceptions=True)
 
             # 处理任务结果
             for meta, task_result in zip(task_meta, task_results):
@@ -1164,9 +1186,17 @@ class IntelligenceReportGenerator:
 
         logger.info(f"[{display_name}] 开始生成日报资讯")
 
+        # 针对本次分析的帖子数自适应计算最低正文长度（180条推文时约3500字，防止半截截断）
+        min_report_length = min(3500, max(800, len(enriched_posts) * 20))
+
         # 调用LLM生成报告
         try:
-            response = self.llm_client.call_smart_model(prompt, model_override=model_name, temperature=0.3)
+            response = self.llm_client.call_smart_model(
+                prompt,
+                model_override=model_name,
+                temperature=0.3,
+                min_content_length=min_report_length
+            )
 
             if not response or not response.get('success'):
                 error_msg = f"LLM调用失败: {response.get('error') if response else 'Unknown error'}"
@@ -1179,6 +1209,17 @@ class IntelligenceReportGenerator:
                 }
 
             llm_output = response.get('content', '')
+
+            # 校验核心板块是否存在（防止模型偷懒漏掉关键板块）
+            if '今日要闻' not in llm_output or '热门话题' not in llm_output:
+                error_msg = f"LLM输出不完整：缺少核心板块（未包含'今日要闻'或'热门话题'）"
+                logger.warning(f"[{display_name}] {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'model': model_name,
+                    'model_display': display_name
+                }
         except Exception as e:
             error_msg = f"LLM调用异常: {str(e)}"
             logger.error(f"[{display_name}] {error_msg}")
@@ -1370,10 +1411,17 @@ class IntelligenceReportGenerator:
                     )
                 )
 
-            logger.info(f"开始并行生成 {len(tasks)} 份深度报告: {[meta['display'] for meta in task_meta]}")
+            logger.info(f"开始并行生成 {len(tasks)} 份深度报告 (并发度限制: {self.max_llm_concurrency}): {[meta['display'] for meta in task_meta]}")
+
+            # 通过信号量控制模型并发数，避免多模型超长请求同时涌入造成网关断流
+            sem = asyncio.Semaphore(self.max_llm_concurrency)
+
+            async def _run_bounded_task(coro):
+                async with sem:
+                    return await coro
 
             # 并行执行所有任务
-            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+            task_results = await asyncio.gather(*[_run_bounded_task(t) for t in tasks], return_exceptions=True)
 
             # 处理任务结果
             for meta, task_result in zip(task_meta, task_results):
@@ -1462,9 +1510,17 @@ class IntelligenceReportGenerator:
 
         logger.info(f"[{display_name}] 开始生成深度报告")
 
+        # 针对本次分析的帖子数自适应计算最低正文长度（180条推文时约3500字，防止半截截断）
+        min_report_length = min(3500, max(800, len(enriched_posts) * 20))
+
         # 调用LLM生成报告
         try:
-            response = self.llm_client.call_smart_model(prompt, model_override=model_name, temperature=0.4)
+            response = self.llm_client.call_smart_model(
+                prompt,
+                model_override=model_name,
+                temperature=0.4,
+                min_content_length=min_report_length
+            )
 
             if not response or not response.get('success'):
                 error_msg = f"LLM调用失败: {response.get('error') if response else 'Unknown error'}"

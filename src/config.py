@@ -308,6 +308,9 @@ class Config:
             'openai_base_url': self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1'),
             'max_content_length': self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 1000000, int),
             'max_tokens': self._get_config_value('llm', 'max_tokens', 'LLM_MAX_TOKENS', 20000, int),
+            'request_timeout': self._get_config_value('llm', 'request_timeout', 'LLM_REQUEST_TIMEOUT', 300, int),
+            'report_concurrency': self._get_config_value('llm', 'report_concurrency', 'LLM_REPORT_CONCURRENCY', 4, int),
+            'retry_delay': self._get_config_value('llm', 'retry_delay', 'LLM_RETRY_DELAY', 5, int),
         }
 
     def get_notion_config(self) -> Dict[str, Any]:
