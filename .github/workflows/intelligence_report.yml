@@ -29,7 +29,7 @@ on:
       hours:
         description: '情报报告时间范围（小时）'
         required: false
-        default: '24'
+        default: '48'
         type: choice
         options:
           - '6'
@@ -40,12 +40,13 @@ on:
       report_limit:
         description: '情报报告分析的最大帖子数量'
         required: false
-        default: '300'
+        default: '240'
         type: choice
         options:
           - '100'
           - '150'
           - '200'
+          - '240'
           - '300'
           - '500'
           - '1000'
@@ -119,7 +120,7 @@ jobs:
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then \
           python3.12 main.py --task intelligence_report --hours ${{ github.event.inputs.hours }} --report-limit ${{ github.event.inputs.report_limit }} --flow ${{ github.event.inputs.report_flow || 'dual' }}; \
         else \
-          python3.12 main.py --task intelligence_report --hours 24 --report-limit 180 --flow dual; \
+          python3.12 main.py --task intelligence_report --hours 48 --report-limit 240 --flow dual; \
         fi
 
   kol_report:
