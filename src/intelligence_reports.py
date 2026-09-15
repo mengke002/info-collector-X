@@ -168,32 +168,66 @@ class IntelligenceReportGenerator:
         return cleaned
 
     def _get_model_display_name(self, model_name: str) -> str:
-        """根据模型名称生成用于展示的友好名称"""
+        """根据模型名称生成用于展示的友好名称（保留MoE激活参数、版本及日期，防止重名）"""
         if not model_name:
             return 'LLM'
 
-        lower_name = model_name.lower()
-        if 'gemini' in lower_name:
-            return 'Gemini'
-        if 'deepseek' in lower_name:
-            return 'DeepSeek'
-        if 'grok' in lower_name:
-            return 'Grok'
-        # GLM模型识别：通用提取版本号（如GLM-4.5、GLM-4.6、GLM-4v等）
-        if 'glm' in lower_name:
-            # 匹配 GLM-数字.数字 或 GLM-数字v 等格式
-            match = re.search(r'glm[- ]?(\d+\.?\d*v?)', lower_name)
-            if match:
-                version = match.group(1)
-                return f'GLM{version}'
-            else:
-                return 'GLM'
-        if 'gpt' in lower_name:
-            return 'GPT'
-        if 'claude' in lower_name:
-            return 'Claude'
+        name = model_name.strip()
 
-        return model_name
+        # 1. 剥离厂商/组织命名空间前缀 (如 "deepseek-ai/"、"nvidia/" -> 保留右侧)
+        if '/' in name:
+            name = name.split('/')[-1]
+
+        # 2. 剥离平台服务Tag (如 ":free"、":beta"、":nitro" -> 保留左侧)
+        if ':' in name:
+            name = name.split(':')[0]
+
+        # 3. 规范化参数量与MoE结构标记
+        # - MoE 激活参数: a55b -> A55B, a21b -> A21B, a2.7b -> A2.7B
+        name = re.sub(r'(?i)\ba(\d+(\.\d+)?)b\b', r'A\1B', name)
+        # - 多专家结构: 8x7b -> 8x7B, 8x22b -> 8x22B
+        name = re.sub(r'(?i)\b(\d+)x(\d+(\.\d+)?)b\b', r'\1x\2B', name)
+        # - 总参数量: 550b -> 550B, 70b -> 70B, 3.8b -> 3.8B
+        name = re.sub(r'(?i)\b(\d+(\.\d+)?)b\b', r'\1B', name)
+
+        # 4. 规范化常见品牌与规格词的大小写
+        token_mappings = {
+            # 厂商与家族
+            r'(?i)\bdeepseek\b': 'DeepSeek',
+            r'(?i)\bqwen\b': 'Qwen',
+            r'(?i)\bnemotron\b': 'Nemotron',
+            r'(?i)\bgemini\b': 'Gemini',
+            r'(?i)\bclaude\b': 'Claude',
+            r'(?i)\bglm\b': 'GLM',
+            r'(?i)\bgpt\b': 'GPT',
+            r'(?i)\bllama\b': 'Llama',
+            r'(?i)\bgrok\b': 'Grok',
+            r'(?i)\bmistral\b': 'Mistral',
+            # 规格与型号
+            r'(?i)\bflash\b': 'Flash',
+            r'(?i)\bpro\b': 'Pro',
+            r'(?i)\bultra\b': 'Ultra',
+            r'(?i)\bchat\b': 'Chat',
+            r'(?i)\breasoner\b': 'Reasoner',
+            r'(?i)\binstruct\b': 'Instruct',
+            r'(?i)\bnext\b': 'Next',
+            r'(?i)\bturbo\b': 'Turbo',
+            r'(?i)\bplus\b': 'Plus',
+            r'(?i)\bmax\b': 'Max',
+            r'(?i)\bmini\b': 'Mini',
+            r'(?i)\bnano\b': 'Nano',
+            r'(?i)\bsonnet\b': 'Sonnet',
+            r'(?i)\bhaiku\b': 'Haiku',
+            r'(?i)\bopus\b': 'Opus',
+            r'(?i)\bpreview\b': 'Preview',
+            r'(?i)\bexp\b': 'Exp',
+            r'(?i)\bv(\d+(\.\d+)?)\b': r'V\1'  # 版本号: v4.1 -> V4.1, v4 -> V4
+        }
+
+        for pattern, repl in token_mappings.items():
+            name = re.sub(pattern, repl, name)
+
+        return name or model_name
 
     def format_enriched_posts_for_smart_llm(self, enriched_posts: List[Dict[str, Any]]) -> Tuple[str, List[Dict[str, Any]]]:
         """
