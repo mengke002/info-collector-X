@@ -29,7 +29,7 @@ class LLMClient:
         self.vlm_fallback_model = llm_config.get('fast_vlm_fallback_model_name', 'gpt-4-vision-preview')
         self.smart_model = llm_config.get('smart_model_name', 'gpt-4.1')
         self.report_models = llm_config.get('report_models', [])
-        self.max_tokens = llm_config.get('max_tokens', 20000)
+        self.max_tokens = llm_config.get('max_tokens', 64000)
         self.timeout = float(llm_config.get('request_timeout', 300))
         self.retry_delay = int(llm_config.get('retry_delay', 5))
 
